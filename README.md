@@ -315,6 +315,184 @@ npm run dev
 
 ## 🔧 开发指南
 
+### Utils工具库
+
+项目提供了一套完整的工具函数库，位于 `src/utils/` 目录下，提供可复用的功能模块。
+
+#### Loading Helper 工具 (`loadingHelper.ts`)
+
+提供统一的Loading状态管理和Element Plus Loading组件的配置。
+
+**主要功能：**
+
+1. **Loading状态管理 (`useLoading`)**
+
+提供了一套完整的Loading状态管理hooks：
+
+```typescript
+import { useLoading } from '@/utils'
+
+export default {
+  setup() {
+    const {
+      isRethinking,      // 重新思考状态
+      isSubmitting,      // 提交状态  
+      isGenerating,      // 生成状态
+      isLoading,         // 任何加载状态的计算属性
+      startRethinking,   // 开始重新思考
+      stopRethinking,    // 停止重新思考
+      startSubmitting,   // 开始提交
+      stopSubmitting,    // 停止提交
+      startGenerating,   // 开始生成
+      stopGenerating,    // 停止生成
+      stopAllLoading,    // 停止所有加载状态
+      getButtonText      // 获取按钮文本助手
+    } = useLoading()
+
+    return {
+      isLoading,
+      startRethinking,
+      stopRethinking,
+      // ... 其他需要的状态和方法
+    }
+  }
+}
+```
+
+2. **Loading配置 (`getLoadingProps`)**
+
+提供预设的Loading配置：
+
+```typescript
+import { defaultLoadingConfig, getLoadingProps } from '@/utils'
+
+// 获取默认Loading配置
+const loadingProps = getLoadingProps(defaultLoadingConfig)
+
+// 在模板中使用
+<div v-loading="isLoading" v-bind="loadingProps">
+  <!-- 内容 -->
+</div>
+```
+
+3. **预设配置**
+
+- `defaultLoadingConfig`: 默认配置
+- `aiThinkingLoadingConfig`: AI思考专用配置
+- `formSubmitLoadingConfig`: 表单提交专用配置
+
+**使用示例：**
+
+```vue
+<template>
+  <form v-loading="isLoading" v-bind="loadingProps">
+    <button @click="rethink" :disabled="isLoading">
+      {{ getButtonText('思考', '正在生成...', isRethinking) }}
+    </button>
+    <button @click="handleSubmit" :disabled="isLoading">
+      {{ getButtonText('下一步', '正在处理...', isSubmitting) }}
+    </button>
+  </form>
+</template>
+
+<script>
+import { useLoading, defaultLoadingConfig, getLoadingProps } from '@/utils'
+
+export default {
+  setup() {
+    const {
+      isRethinking,
+      isSubmitting, 
+      isLoading,
+      startRethinking,
+      stopRethinking,
+      startSubmitting,
+      stopSubmitting,
+      getButtonText
+    } = useLoading()
+
+    const loadingProps = getLoadingProps(defaultLoadingConfig)
+
+    return {
+      isLoading,
+      isRethinking,
+      isSubmitting,
+      startRethinking,
+      stopRethinking,
+      startSubmitting,
+      stopSubmitting,
+      getButtonText,
+      loadingProps
+    }
+  },
+  methods: {
+    async rethink() {
+      try {
+        this.startRethinking()
+        // 执行异步操作
+        await this.performRethink()
+      } finally {
+        this.stopRethinking()
+      }
+    },
+    
+    async handleSubmit() {
+      try {
+        this.startSubmitting()
+        // 执行提交操作
+        await this.performSubmit()
+      } finally {
+        this.stopSubmitting()
+      }
+    }
+  }
+}
+</script>
+```
+
+**在其他组件中复用：**
+
+任何需要Loading状态的组件都可以直接导入使用：
+
+```typescript
+// 在其他Vue组件中
+import { useLoading, aiThinkingLoadingConfig, getLoadingProps } from '@/utils'
+
+export default {
+  setup() {
+    const { isLoading, startGenerating, stopGenerating } = useLoading()
+    const loadingProps = getLoadingProps(aiThinkingLoadingConfig)
+    
+    return { isLoading, startGenerating, stopGenerating, loadingProps }
+  }
+}
+```
+
+**扩展自定义Loading状态：**
+
+如果需要新的Loading状态，可以直接在`useLoading`中添加：
+
+```typescript
+export function useLoading() {
+  const isCustomOperation = ref(false)
+  
+  const startCustomOperation = () => {
+    isCustomOperation.value = true
+  }
+  
+  const stopCustomOperation = () => {
+    isCustomOperation.value = false
+  }
+  
+  return {
+    // 现有的状态和方法...
+    isCustomOperation,
+    startCustomOperation,
+    stopCustomOperation
+  }
+}
+```
+
 ### 项目结构
 ```
 AI-WorkFlow-Manager/

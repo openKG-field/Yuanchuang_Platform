@@ -24,20 +24,7 @@
           <h1>目标提示</h1>
           <p>Target cue</p>
         </div>
-        <form @submit.prevent="handleSubmit" class="form-container">
-      <!-- AI思考提示 -->
-      <div v-if="isLoading" class="ai-thinking-overlay">
-        <div class="thinking-indicator">
-          <div class="thinking-dots">
-            <span class="dot"></span>
-            <span class="dot"></span>
-            <span class="dot"></span>
-          </div>
-          <span class="thinking-text">
-            {{ thinkingText }}
-          </span>
-        </div>
-      </div>
+        <form @submit.prevent="handleSubmit" class="form-container" v-loading="isLoading" v-bind="loadingProps">
       
       <div class="form-group">
         <label for="area"><strong>解决方案</strong></label>
@@ -112,6 +99,8 @@
 </template>
 
 <script>
+import { useLoading, defaultLoadingConfig, getLoadingProps } from '@/utils'
+
 // 常量定义
 const API_CONFIG = {
   AI_URL: '/api/ai',  // AI相关请求
@@ -132,6 +121,34 @@ const WORD_SEPARATORS = /[,，;；\s、\n]+/;
 
 export default {
   name: 'Template',
+  setup() {
+    // 使用Loading工具
+    const {
+      isRethinking,
+      isSubmitting,
+      isLoading,
+      startRethinking,
+      stopRethinking,
+      startSubmitting,
+      stopSubmitting,
+      getButtonText
+    } = useLoading()
+
+    // 获取Loading配置属性
+    const loadingProps = getLoadingProps(defaultLoadingConfig)
+
+    return {
+      isRethinking,
+      isSubmitting,
+      isLoading,
+      startRethinking,
+      stopRethinking,
+      startSubmitting,
+      stopSubmitting,
+      getButtonText,
+      loadingProps
+    }
+  },
   data() {
     return {
       form: {
@@ -141,8 +158,6 @@ export default {
         tone: '',
         prompt: ''
       },
-      isRethinking: false,
-      isSubmitting: false,
       commandWords: [],
       keyWords: [],
       selectedCommandWords: [],
@@ -154,21 +169,11 @@ export default {
     };
   },
   computed: {
-    // 计算属性：是否正在加载
-    isLoading() {
-      return this.isRethinking || this.isSubmitting;
-    },
-    
-    // 计算属性：思考状态文字
-    thinkingText() {
-      return this.isRethinking ? 'AI正在智能生成内容...' : 'AI正在处理您的请求...';
-    },
-    
     // 计算属性：按钮文字
     buttonTexts() {
       return {
-  rethink: this.isRethinking ? '正在生成...' : '思考',
-        submit: this.isSubmitting ? '正在处理...' : '下一步'
+        rethink: this.getButtonText('思考', '正在生成...', this.isRethinking),
+        submit: this.getButtonText('下一步', '正在处理...', this.isSubmitting)
       };
     }
   },
@@ -337,7 +342,7 @@ export default {
     },
     async rethink() {
   console.log('思考');
-      this.isRethinking = true; // 设置重新思考加载状态
+      this.startRethinking();
       try {
         const response = await fetch(API_CONFIG.AI_URL, {
           method: 'POST',
@@ -392,7 +397,7 @@ export default {
       } catch (error) {
         // 忽略AI生成失败，用户可手动填写
       } finally {
-        this.isRethinking = false; // 无论成功还是失败，都要取消加载状态
+        this.stopRethinking();
       }
     },
     /**
@@ -401,7 +406,7 @@ export default {
     async handleSubmit() {
       if (this.isLoading) return;
       
-      this.isSubmitting = true;
+      this.startSubmitting();
 
       try {
         const limitedAudience = this.getLimitedAudience();
@@ -460,7 +465,7 @@ export default {
       } catch (error) {
         console.error('请求失败:', error);
       } finally {
-        this.isSubmitting = false;
+        this.stopSubmitting();
       }
     },
     
@@ -823,6 +828,12 @@ export default {
   box-shadow: var(--shadow-light);
   padding: 32px 28px 24px 28px;
   position: relative;
+  min-height: 400px; /* 确保有足够的高度显示Loading */
+}
+
+/* 确保Element Plus Loading遮罩正确显示 */
+.form-container :deep(.el-loading-mask) {
+  border-radius: var(--border-radius-large);
 }
 
 .form-group {
@@ -904,66 +915,6 @@ label {
   opacity: 0.6;
   cursor: not-allowed;
   background: #ccc !important;
-}
-
-.ai-thinking-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(255, 255, 255, 0.9);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--border-radius-large);
-  z-index: 10;
-}
-
-.thinking-indicator {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 20px;
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: var(--shadow-medium);
-}
-
-.thinking-dots {
-  display: flex;
-  gap: 4px;
-}
-
-.dot {
-  width: 8px;
-  height: 8px;
-  background-color: var(--primary-color);
-  border-radius: 50%;
-  animation: thinking 1.4s infinite ease-in-out both;
-}
-
-.dot:nth-child(1) {
-  animation-delay: -0.32s;
-}
-
-.dot:nth-child(2) {
-  animation-delay: -0.16s;
-}
-
-.thinking-text {
-  color: var(--primary-color);
-  font-size: 1.1em;
-  font-weight: 600;
-}
-
-@keyframes thinking {
-  0%, 80%, 100% {
-    transform: scale(0);
-  }
-  40% {
-    transform: scale(1);
-  }
 }
 
 /* 词语选择样式 */
