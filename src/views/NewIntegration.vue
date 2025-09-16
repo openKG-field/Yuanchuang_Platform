@@ -1,11 +1,5 @@
 <template>
-  <div class="outer-container">
-    <div v-if="generatingSolutions" class="global-overlay">
-      <div class="overlay-content">
-        <div class="spinner"></div>
-        <div class="msg">AI 正在生成两个综合解决方案，请稍候...</div>
-      </div>
-    </div>
+  <div class="outer-container" v-loading="isGenerating" v-bind="loadingProps">
     <div class="combined-container">
       <div class="content">
         <aside :class="['left-panel', { collapsed: taskListCollapsed }]">
@@ -78,7 +72,7 @@
           </div>
           <!-- 确认按钮 -->
           <div class="continue-button">
-            <button @click="confirmAndRedirect">确认</button>
+            <button @click="confirmAndRedirect" :disabled="isGenerating">确认</button>
           </div>
         </div>
       </div>
@@ -90,6 +84,7 @@
 import { ElIcon } from 'element-plus';
 import { ArrowRight, ArrowLeft, Delete } from '@element-plus/icons-vue';
 import { getAIResponse } from '../../apiService';
+import { useLoading, defaultLoadingConfig, getLoadingProps } from '@/utils';
 
 export default {
   name: "NewIntegration",
@@ -97,7 +92,27 @@ export default {
     ElIcon,
     'el-icon-arrow-right': ArrowRight,
     'el-icon-arrow-left': ArrowLeft,
-  'el-icon-delete': Delete,
+    'el-icon-delete': Delete,
+  },
+  setup() {
+    // 使用Loading工具
+    const {
+      isGenerating,
+      startGenerating,
+      stopGenerating,
+      isLoading
+    } = useLoading();
+
+    // 获取Loading配置属性
+    const loadingProps = getLoadingProps(defaultLoadingConfig);
+
+    return {
+      isGenerating,
+      startGenerating,
+      stopGenerating,
+      isLoading,
+      loadingProps
+    };
   },
   data() {
     return {
@@ -116,9 +131,7 @@ export default {
       aiAnswers: {}, // {subTaskId: text}
       aiLoading: false,
       // AI 要点选择
-  selectedAiPoints: [],
-  // 生成两个解决方案时的全局加载状态
-  generatingSolutions: false,
+      selectedAiPoints: [],
     };
   },
   computed: {
@@ -268,13 +281,13 @@ export default {
     },
     // 选择父任务
     selectParentTask(taskName) {
-      if (this.generatingSolutions) return; // 禁用交互
+      if (this.isGenerating) return; // 禁用交互
       this.currentTaskName = taskName;
       this.loadTaskPlanFromBackend();
     },
     // 选择子任务并触发 AI
-  async selectPlanTask(task) {
-      if (this.generatingSolutions) return; // 禁用交互
+    async selectPlanTask(task) {
+      if (this.isGenerating) return; // 禁用交互
       this.activePlanTaskId = task.id;
       // 若已有答案则不重复请求
       if (this.aiAnswers[task.id]) return;
@@ -337,7 +350,7 @@ export default {
     
     
   async confirmAndRedirect() {
-    if (this.generatingSolutions) return;
+    if (this.isGenerating) return;
         const combined = Array.from(new Set([ ...(this.selectedIssues || []), ...(this.selectedAiPoints || []) ]))
           .map(s => String(s).trim())
           .filter(Boolean);
@@ -345,8 +358,9 @@ export default {
           alert('请选择至少一个问题！');
           return;
         }
-    this.generatingSolutions = true;
+    
     try {
+      this.startGenerating();
           // 1. 保存选中问题（不再生成 / 依赖 单一综合方案 ai_solution）
           const analysisId = await this.saveAnalysisToDatabase('', combined.join('\n'));
 
@@ -411,7 +425,7 @@ export default {
           console.error('生成两个综合方案失败:', e);
           alert('生成方案失败，请重试。');
         } finally {
-          this.generatingSolutions = false;
+          this.stopGenerating();
         }
     },
     
@@ -499,12 +513,6 @@ export default {
 </script>
 
 <style scoped>
-.global-overlay { position: fixed; inset:0; background: rgba(0,0,0,0.55); backdrop-filter: blur(2px); display:flex; align-items:center; justify-content:center; z-index:9999; }
-.overlay-content { background:#1e1e1e; color:#fff; padding:32px 42px; border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.35); display:flex; flex-direction:column; align-items:center; gap:18px; max-width:420px; text-align:center; }
-.overlay-content .msg { font-size:16px; line-height:1.6; }
-.spinner { width:48px; height:48px; border:5px solid rgba(255,255,255,0.25); border-top-color:#4ea1ff; border-radius:50%; animation: spin 1s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg);} }
-
 .outer-container {
   display: flex;
   justify-content: center;

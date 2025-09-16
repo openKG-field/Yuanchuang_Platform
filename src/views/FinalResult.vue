@@ -1,12 +1,5 @@
 <template>
-  <div class="final-result">
-    <!-- 全局评分遮罩：点击“下一步”后 AI 评分时阻止操作 -->
-    <div v-if="evaluating" class="global-overlay">
-      <div class="overlay-content">
-        <div class="spinner"></div>
-        <div class="msg">AI 正在评分与评估，请稍候...</div>
-      </div>
-    </div>
+  <div class="final-result" v-loading="isGenerating" v-bind="loadingProps">
     <!-- 左侧可折叠边栏：承接 TemplateSelection 的呈现（任务序号 + 名称） -->
     <aside :class="['sidebar-left', { collapsed: sidebarCollapsed }]">
       <div class="toggle-icon" @click="toggleSidebar">
@@ -49,8 +42,8 @@
       </div>
       <div class="next-button">
         <div class="actions-row">
-          <button class="secondary" @click="regeneratePlan" :disabled="streaming || evaluating">重新思考</button>
-          <button @click="sendResultToAI" :disabled="evaluating || streaming">下一步</button>
+          <button class="secondary" @click="regeneratePlan" :disabled="streaming || isGenerating">重新思考</button>
+          <button @click="sendResultToAI" :disabled="isGenerating || streaming">下一步</button>
         </div>
       </div>
     </main>
@@ -61,9 +54,15 @@
 import { marked } from 'marked'; // 引入 marked 库
 import { ElIcon } from 'element-plus';
 import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue';
+import { useLoading, defaultLoadingConfig, getLoadingProps } from '@/utils';
 
 export default {
   name: 'FinalResult',
+  setup() {
+    const { isGenerating, startGenerating, stopGenerating } = useLoading();
+    const loadingProps = getLoadingProps(defaultLoadingConfig);
+    return { isGenerating, startGenerating, stopGenerating, loadingProps };
+  },
   data() {
     return {
       title: this.$route.query.title || '',
@@ -83,8 +82,6 @@ export default {
   streamError: '',
   aiCombinedPlan: '',
   combinedPlanLoaded: false,
-  // 评分阶段加载态
-  evaluating: false,
     };
   },
   components: { ElIcon, 'el-icon-arrow-left': ArrowLeft, 'el-icon-arrow-right': ArrowRight },
@@ -318,8 +315,8 @@ export default {
       try { navigator.clipboard.writeText(this.aiCombinedPlan); } catch (_) {}
     },
     async sendResultToAI() {
-      if (this.evaluating) return;
-      this.evaluating = true;
+      if (this.isGenerating) return;
+      this.startGenerating();
       this.saveFinalToLocal();
       let aiResponse = '';
       try {
@@ -348,7 +345,7 @@ export default {
         aiResponse = '评分异常: ' + (error?.message || error);
         console.error('请求失败:', error);
       } finally {
-        this.evaluating = false;
+        this.stopGenerating();
       }
       // 无论成功失败都前往 Visualization（失败时也带提示文本方便排查）
       this.$router.push({ name: 'Visualization', query: { aiScores: aiResponse } });
@@ -358,11 +355,6 @@ export default {
 </script>
 
 <style scoped>
-.global-overlay { position: fixed; inset:0; background: rgba(0,0,0,0.55); backdrop-filter: blur(2px); display:flex; align-items:center; justify-content:center; z-index:9999; }
-.overlay-content { background:#1e1e1e; color:#fff; padding:32px 42px; border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.35); display:flex; flex-direction:column; align-items:center; gap:18px; max-width:420px; text-align:center; }
-.overlay-content .msg { font-size:16px; line-height:1.6; }
-.spinner { width:48px; height:48px; border:5px solid rgba(255,255,255,0.25); border-top-color:#4ea1ff; border-radius:50%; animation: spin 1s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg);} }
 .final-result {
   min-height: 100vh;
   background: linear-gradient(135deg, #e0e7ff 0%, #f9f9f9 100%);
