@@ -18,32 +18,49 @@
         <router-link to="/" class="account-button">账户</router-link>
       </nav>
       <main class="content">
-        <div class="breadcrumb-container">
-          <div class="breadcrumb-left">
-            <h2>你在：</h2>
-            <el-breadcrumb separator="/" class="breadcrumb">
-              <el-breadcrumb-item v-for="(item, index) in breadcrumbItems" :key="index" :to="item.to">
-                <a v-if="item.to" :href="item.to">{{ item.label }}</a>
-                <span v-else>{{ item.label }}</span>
-              </el-breadcrumb-item>
-            </el-breadcrumb>
-          </div>
-          <div class="tabs">
-            <div class="vertical-line"></div>
-            <div
-              class="tab"
-              v-for="tab in tabs"
-              :key="tab"
-              :class="{
-                active: (tab === '检索文献' && (isSearchHighlight || isNewIntegration)) ||
-                        (tab === '可视化' && isVisualization) ||
-                        (tab === '编辑入库' && isTemplateOrFavoritesOrOthers)
-              }"
-            >
-              {{ tab }}
-            </div>
-
-          </div>
+        <div class="steps-container">
+          <el-steps :active="currentStep" finish-status="success" align-center>
+            <el-step 
+              title="需求收集" 
+              description="AI智能对话"
+              icon="ChatDotRound"
+            />
+            <el-step 
+              title="模板生成" 
+              description="结构化模板"
+              icon="Document"
+            />
+            <el-step 
+              title="任务管理" 
+              description="三维分析"
+              icon="Management"
+            />
+            <el-step 
+              title="集成分析" 
+              description="问题识别"
+              icon="Search"
+            />
+            <el-step 
+              title="结果对比" 
+              description="方案生成"
+              icon="Scale"
+            />
+            <el-step 
+              title="模板选择" 
+              description="方法对比"
+              icon="Select"
+            />
+            <el-step 
+              title="最终整合" 
+              description="方案确定"
+              icon="Finished"
+            />
+            <el-step 
+              title="可视化评估" 
+              description="效果评估"
+              icon="PieChart"
+            />
+          </el-steps>
         </div>
         <router-view />
       </main>
@@ -62,7 +79,18 @@ export default defineComponent({
       breadcrumbItems: [],
       tabs: ['检索文献', '可视化', '编辑入库'],
       entryClickCount: 0, // 初始化为0
-      tasks: [] // 移除默认任务
+      tasks: [], // 移除默认任务
+      currentStep: 0, // 当前步骤
+      stepRoutes: [
+        '/dialog',           // 0: 需求收集
+        '/template',         // 1: 模板生成  
+        '/task-manager',     // 2: 任务管理
+        '/newintegration',   // 3: 集成分析
+        '/results',          // 4: 结果对比
+        '/template-selection', // 5: 模板选择
+        '/final-result',     // 6: 最终整合
+        '/visualization'     // 7: 可视化评估
+      ]
     };
   },
   computed: {
@@ -97,6 +125,7 @@ export default defineComponent({
       handler(to) {
         this.updateBreadcrumb(to);
         this.updateTaskNames();
+        this.updateCurrentStep(to);
       }
     }
   },
@@ -155,6 +184,13 @@ export default defineComponent({
           this.tasks[activeTaskIndex].name = `任务${activeTaskIndex + 1}(${currentPageBreadcrumb})`;
         }
       }
+    },
+    updateCurrentStep(route) {
+      const routePath = route.path;
+      const stepIndex = this.stepRoutes.findIndex(step => step === routePath);
+      if (stepIndex !== -1) {
+        this.currentStep = stepIndex;
+      }
     }
   }
 });
@@ -192,6 +228,75 @@ export default defineComponent({
   background: linear-gradient(90deg, #42b983 0%, #007bff 100%);
   margin-top: 10px;
   border-radius: 1px;
+}
+
+.steps-container {
+  padding: 20px;
+  background: linear-gradient(135deg, #f8f9ff 0%, #e8f1ff 100%);
+  border-bottom: 1px solid #e0e7ff;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  margin-bottom: 20px;
+}
+
+.steps-container :deep(.el-steps) {
+  padding: 10px 0;
+}
+
+.steps-container :deep(.el-step__title) {
+  font-size: 14px;
+  font-weight: 600;
+  color: #3b3b6d;
+  line-height: 1.2;
+}
+
+.steps-container :deep(.el-step__description) {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+.steps-container :deep(.el-step__head) {
+  transition: transform 0.2s ease;
+}
+
+.steps-container :deep(.el-step__icon) {
+  border-radius: 50%;
+  background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
+  border: 2px solid #e2e8f0;
+  transition: all 0.3s ease;
+}
+
+.steps-container :deep(.el-step.is-process .el-step__icon) {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  border-color: #3b82f6;
+  color: white;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.steps-container :deep(.el-step.is-finish .el-step__icon) {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border-color: #10b981;
+  color: white;
+}
+
+.steps-container :deep(.el-step.is-process .el-step__title) {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.steps-container :deep(.el-step.is-finish .el-step__title) {
+  color: #059669;
+  font-weight: 600;
+}
+
+.steps-container :deep(.el-step__line) {
+  background: linear-gradient(90deg, #e2e8f0 0%, #cbd5e1 100%);
+  height: 2px;
+}
+
+.steps-container :deep(.el-step.is-finish .el-step__line) {
+  background: linear-gradient(90deg, #10b981 0%, #059669 100%);
 }
 
 .breadcrumb-container {

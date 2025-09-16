@@ -1,7 +1,7 @@
 <template>
   <div class="template-selection">
     <nav class="navbar">
-      <div class="logo">模板选择</div>
+      <div class="logo">结果对比</div>
     </nav>
 
     <div class="page-body">

@@ -178,6 +178,14 @@ visualization_assessments     -- 可视化评估表
 
 ## 🚀 快速开始
 
+> **📋 配置前须知**  
+> 本项目需要您自己提供以下配置：
+> - MySQL数据库连接信息
+> - DeepSeek AI API密钥  
+> - JWT密钥（用于用户认证）
+> 
+> 请在开始之前准备好这些配置信息。
+
 ### 环境要求
 - **Node.js** >= 16.0.0
 - **MySQL** >= 8.0
@@ -204,25 +212,62 @@ npm install
 
 4. **配置环境变量**
 
+⚠️ **重要提示**：以下环境变量需要您自己提供和配置
+
+**后端环境变量配置**：
 在 `login-backend` 目录下创建 `.env` 文件：
 ```env
-# 数据库配置
+# 数据库配置（需要您自己提供MySQL数据库信息）
 DB_HOST=localhost
 DB_USER=root
-DB_PASSWORD=your_mysql_password
-DB_NAME=workflow_db
+DB_PASSWORD=your_mysql_password  # 替换为您的MySQL密码
+DB_NAME=user_system             # 数据库名称
+PORT=3000
 
-# 安全配置
-JWT_SECRET=your_jwt_secret_key
+# 安全配置（请生成您自己的密钥）
+JWT_SECRET=your_jwt_secret_key  # 替换为您的JWT密钥
+```
 
-# AI配置
-DEEPSEEK_API_KEY=your_deepseek_api_key
+**前端环境变量配置**：
+在项目根目录下创建 `.env` 文件：
+```env
+# AI API配置（需要您自己申请API密钥）
+VITE_API_KEY=your_deepseek_api_key        # DeepSeek API密钥
+DASHSCOPE_API_KEY=your_dashscope_api_key  # 阿里云灵积API密钥（可选）
+TAVILY_API_KEY=your_tavily_api_key        # Tavily搜索API密钥（可选）
+```
+
+**如何获取API密钥**：
+- **DeepSeek API**：访问 [DeepSeek官网](https://platform.deepseek.com/) 注册并获取API密钥
+- **阿里云灵积**：访问 [阿里云灵积平台](https://dashscope.aliyun.com/) 申请API密钥
+- **Tavily搜索**：访问 [Tavily官网](https://tavily.com/) 申请搜索API密钥
+
+**配置文件位置**：
+```
+项目根目录/
+├── .env                    # 前端环境变量（AI API配置）
+├── login-backend/
+│   └── .env               # 后端环境变量（数据库和JWT配置）
+└── ...
 ```
 
 5. **启动MySQL并创建数据库**
+
+⚠️ **注意**：请确保您已经安装并启动了MySQL 8.0+
+
 ```sql
-CREATE DATABASE workflow_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- 请使用您自己的MySQL连接信息
+CREATE DATABASE user_system CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- 如果需要创建新用户（可选）
+CREATE USER 'your_username'@'localhost' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON user_system.* TO 'your_username'@'localhost';
+FLUSH PRIVILEGES;
 ```
+
+**数据库配置说明**：
+- 数据库会在首次启动后端服务时自动创建所需的表结构
+- 请确保 `.env` 文件中的数据库配置与您的MySQL设置一致
 
 6. **启动后端服务**
 ```bash
@@ -366,6 +411,16 @@ GET /api/visualization-assessments              // 获取评估历史
 ## 🔍 故障排除
 
 ### 常见问题及解决方案
+
+#### 0. 环境变量配置问题
+```bash
+Error: 缺少必要的环境变量
+```
+**解决方案**：
+- 检查 `login-backend/.env` 文件是否存在且包含所有必要配置
+- 检查项目根目录 `.env` 文件是否包含AI API密钥
+- 确认所有API密钥都已正确设置且有效
+- 重启服务以使环境变量生效
 
 #### 1. 数据库连接问题
 ```bash
