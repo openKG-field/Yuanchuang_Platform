@@ -196,7 +196,7 @@ visualization_assessments     -- 可视化评估表
 1. **克隆项目**
 ```bash
 git clone <repository-url>
-cd demo2
+cd AI-WorkFlow-Manager
 ```
 
 2. **安装前端依赖**
@@ -317,7 +317,7 @@ npm run dev
 
 ### 项目结构
 ```
-demo2/
+AI-WorkFlow-Manager/
 ├── src/
 │   ├── components/              # 公共组件
 │   │   ├── breadcrumb.vue      # 面包屑导航
