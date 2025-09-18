@@ -491,8 +491,19 @@
 </template>
 
 <script>
+import { useSidebar } from '@/utils/sidebarMixin';
+
 export default {
   name: 'Flowchart',
+  setup() {
+    // 使用侧栏 composable
+    const { sidebarCollapsed, toggleSidebar } = useSidebar();
+    
+    return {
+      sidebarCollapsed,
+      toggleSidebar
+    };
+  },
   data() {
     return {
       conversations: [],
@@ -504,7 +515,6 @@ export default {
       loading: false,
       selectedTask: null, // 当前选中的任务
       uniqueTasks: [], // 去重后的任务列表
-      sidebarCollapsed: false, // 侧边栏收起状态
       // 节点图相关数据
       canvasWidth: 1200,
       canvasHeight: 800,
@@ -1374,15 +1384,6 @@ export default {
       }
     },
 
-    // 切换侧边栏显示/隐藏
-    toggleSidebar() {
-      this.sidebarCollapsed = !this.sidebarCollapsed;
-      // 延迟更新画布大小，等待CSS动画完成
-      setTimeout(() => {
-        this.updateCanvasSize();
-      }, 300);
-    },
-
     // 获取状态文本
     getStatusText() {
       if (this.selectedTask) {
@@ -1674,6 +1675,8 @@ export default {
 </script>
 
 <style scoped>
+@import '../utils/sidebar.css';
+
 .flowchart-container {
   display: flex;
   width: 100%;
@@ -1682,72 +1685,7 @@ export default {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
-/* 左侧边栏样式 */
-.sidebar {
-  width: 280px;
-  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
-  color: white;
-  padding: 20px;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  position: relative;
-  transition: all 0.3s ease;
-}
-
-.sidebar.collapsed {
-  width: 60px;
-  padding: 20px 10px;
-}
-
-.sidebar-toggle {
-  position: absolute;
-  top: 20px;
-  right: -15px;
-  width: 30px;
-  height: 30px;
-  background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-  border: none;
-  border-radius: 50%;
-  color: white;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  z-index: 1001;
-  transition: all 0.3s ease;
-  font-weight: bold;
-}
-
-.sidebar-toggle:hover {
-  background: linear-gradient(135deg, #2980b9 0%, #1f4e79 100%);
-  transform: scale(1.1);
-}
-
-.toggle-icon {
-  font-size: 12px;
-  transition: transform 0.3s ease;
-}
-
-.sidebar-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.sidebar h3 {
-  margin: 0 0 20px 0;
-  font-size: 1.3em;
-  text-align: center;
-  color: #ecf0f1;
-  border-bottom: 2px solid rgba(255, 255, 255, 0.3);
-  padding-bottom: 12px;
-  font-weight: 600;
-}
-
+/* 任务列表特定样式 */
 .task-stats {
   background: rgba(255, 255, 255, 0.15);
   padding: 15px;
@@ -2508,25 +2446,6 @@ export default {
 @media (max-width: 768px) {
   .flowchart-container {
     flex-direction: column;
-  }
-  
-  .sidebar {
-    width: 100%;
-    max-height: 200px;
-    padding: 15px;
-    position: relative;
-  }
-  
-  .sidebar.collapsed {
-    width: 100%;
-    max-height: 60px;
-    padding: 15px;
-  }
-  
-  .sidebar-toggle {
-    position: static;
-    margin: 0 auto 10px auto;
-    display: block;
   }
   
   .task-list {

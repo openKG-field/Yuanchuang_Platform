@@ -1,0 +1,69 @@
+/* 可复用侧栏样式 */
+
+.sidebar {
+  width: 260px;
+  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+  color: white;
+  padding: 20px 16px 16px 16px;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  border-radius: 12px;
+  transition: width 0.3s ease, padding 0.3s ease;
+}
+
+.sidebar.collapsed {
+  width: 60px;
+  padding: 20px 8px;
+  align-items: center;
+}
+
+.sidebar-toggle {
+  position: absolute;
+  top: 12px;
+  right: -14px;
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+  border: none;
+  border-radius: 50%;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+
+.toggle-icon { 
+  font-size: 12px; 
+}
+
+.sidebar-content { 
+  flex: 1; 
+  display: flex; 
+  flex-direction: column; 
+}
+
+.sidebar h3 {
+  margin: 0 0 16px 0;
+  font-size: 1.1em;
+  text-align: center;
+  color: #ecf0f1;
+  border-bottom: 2px solid rgba(255,255,255,0.3);
+  padding-bottom: 8px;
+  font-weight: 600;
+}
+
+/* 响应式侧栏 */
+@media (max-width: 768px) {
+  .sidebar { 
+    width: 100%; 
+    border-radius: 8px; 
+  }
+  .sidebar.collapsed { 
+    width: 100%; 
+  }
+}

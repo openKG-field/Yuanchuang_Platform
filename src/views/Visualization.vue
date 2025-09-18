@@ -1,30 +1,32 @@
 <template>
   <div class="visualization">
-    <div :class="['sidebar', { collapsed: isSidebarCollapsed }]">
-      <div class="toggle-icon" @click="toggleSidebar">
-        <span v-if="isSidebarCollapsed">▶</span>
-        <span v-else>◀</span>
-      </div>
-      <div v-if="!isSidebarCollapsed" class="sidebar-content">
-        <div class="task-list">
-          <h2>任务记录</h2>
-          <div class="task-counter">
-            <p>总任务数: <span class="count">{{ totalTaskCount }}</span></p>
-          </div>
-          <ul class="task-history">
-            <li 
-              v-for="(task, index) in recentTasks" 
-              :key="index" 
-              class="task-item"
-              @click="selectTask(task)"
-              :class="{ 'active': selectedTask === task }"
-            >
-              <span class="task-name">{{ task }}</span>
-            </li>
-          </ul>
+    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
+      <button class="sidebar-toggle" @click="toggleSidebar">
+        <span class="toggle-icon">{{ sidebarCollapsed ? '▶' : '◀' }}</span>
+      </button>
+
+      <div class="sidebar-content" v-show="!sidebarCollapsed">
+        <h3>任务记录</h3>
+        
+        <!-- 任务计数器 -->
+        <div class="task-stats">
+          <p>总任务数: <span class="count">{{ totalTaskCount }}</span></p>
         </div>
+        
+        <!-- 最近任务列表 -->
+        <ul class="task-list">
+          <li 
+            v-for="(task, index) in recentTasks" 
+            :key="index" 
+            class="task-item"
+            @click="selectTask(task)"
+            :class="{ 'active': selectedTask === task }"
+          >
+            <span class="task-name">{{ task }}</span>
+          </li>
+        </ul>
       </div>
-    </div>
+    </aside>
     <div class="main-content">
       <h2>可视化图表</h2>
       <div class="content">
@@ -51,13 +53,22 @@ import * as echarts from 'echarts';
 import { marked } from 'marked';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import { useSidebar } from '@/utils/sidebarMixin';
 
 export default {
   name: "Visualization",
+  setup() {
+    // 使用侧栏 composable
+    const { sidebarCollapsed, toggleSidebar } = useSidebar();
+    
+    return {
+      sidebarCollapsed,
+      toggleSidebar
+    };
+  },
   data() {
     return {
       aiScores: this.$route.query.aiScores || '',
-      isSidebarCollapsed: false,
       showRadarChart: false,
       showTask1Content: false,
       selectedTask: '', // 当前选中的任务
@@ -123,9 +134,6 @@ export default {
         };
         chart2D.setOption(option2D);
       }
-    },
-    toggleSidebar() {
-      this.isSidebarCollapsed = !this.isSidebarCollapsed;
     },
     /**
      * 加载Dialog.vue的任务数据
@@ -781,6 +789,8 @@ export default {
 </script>
 
 <style scoped>
+@import '../utils/sidebar.css';
+
 .visualization {
   display: flex;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -791,66 +801,17 @@ export default {
   min-height: 100vh;
 }
 
-.sidebar {
-  width: 250px;
-  transition: width 0.3s ease;
-  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
-  color: white;
-  padding: 20px;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
-  position: relative;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.sidebar.collapsed {
-  width: 40px;
-  padding: 20px 5px;
-}
-
-.toggle-icon {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  cursor: pointer;
-  font-size: 1.5em;
-  color: #ecf0f1;
-  transition: color 0.3s ease;
-}
-
-.toggle-icon:hover {
-  color: #f39c12;
-}
-
-.sidebar-content {
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-  margin-top: 20px;
-}
-
-.task-selector h2 {
-  margin: 0 0 15px 0;
-  font-size: 1.3em;
-  text-align: center;
-  color: #ecf0f1;
-  border-bottom: 2px solid rgba(255, 255, 255, 0.3);
-  padding-bottom: 12px;
-  font-weight: 600;
-  letter-spacing: 1px;
-}
-
-.task-counter {
+/* 任务列表样式 */
+.task-stats {
   background: rgba(255, 255, 255, 0.15);
-  padding: 18px;
-  border-radius: 10px;
-  margin-bottom: 20px;
+  padding: 10px;
+  border-radius: 8px;
   text-align: center;
   border: 1px solid rgba(255, 255, 255, 0.2);
+  margin-bottom: 12px;
 }
 
-.task-counter p {
+.task-stats p {
   margin: 0;
   font-size: 1.1em;
   color: #ecf0f1;
@@ -858,98 +819,46 @@ export default {
 }
 
 .count {
-  font-weight: bold;
-  font-size: 1.4em;
+  font-weight: 800;
   color: #f39c12;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
-.task-history {
+.task-list {
   list-style: none;
   padding: 0;
   margin: 0;
-  flex: 1;
   overflow-y: auto;
-  max-height: 300px;
+  max-height: 400px;
 }
 
 .task-item {
-  padding: 12px;
+  padding: 10px;
   margin-bottom: 10px;
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   border-left: 4px solid #3498db;
-  transition: all 0.2s;
-  border: 1px solid rgba(255, 255, 255, 0.1);
   cursor: pointer;
+  transition: all 0.2s;
 }
 
 .task-item:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.18);
   border-left-color: #e74c3c;
   transform: translateX(2px);
 }
 
 .task-item.active {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.22);
   border-left-color: #f39c12;
   transform: translateX(2px);
 }
 
 .task-name {
   font-size: 0.95em;
-  display: block;
+  color: #ecf0f1;
+  font-weight: 500;
   word-wrap: break-word;
   line-height: 1.4;
-  color: #ecf0f1;
-  font-weight: 500;
-}
-
-.sidebar-content label {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  border-left: 4px solid #3498db;
-  transition: all 0.2s;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  cursor: pointer;
-}
-
-.sidebar-content label:hover {
-  background: rgba(255, 255, 255, 0.25);
-  border-left-color: #e74c3c;
-  transform: translateX(2px);
-}
-
-.sidebar-content input[type="radio"] {
-  margin-right: 0;
-  accent-color: #3498db;
-}
-
-.sidebar-content {
-  color: #ecf0f1;
-  font-weight: 500;
-}
-
-.sidebar-content button {
-  padding: 12px 20px;
-  background: linear-gradient(90deg, #3498db 0%, #5dade2 100%);
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-weight: 600;
-  box-shadow: 0 2px 8px rgba(52, 152, 219, 0.3);
-}
-
-.sidebar-content button:hover {
-  background: linear-gradient(90deg, #2980b9 0%, #3498db 100%);
-  box-shadow: 0 4px 16px rgba(52, 152, 219, 0.4);
-  transform: translateY(-1px);
 }
 
 .main-content {
@@ -1035,18 +944,6 @@ export default {
 @media (max-width: 768px) {
   .visualization {
     flex-direction: column;
-  }
-  
-  .sidebar {
-    width: 100%;
-    min-height: auto;
-    padding: 15px;
-    order: -1;
-  }
-  
-  .sidebar.collapsed {
-    width: 100%;
-    padding: 15px;
   }
   
   .main-content {

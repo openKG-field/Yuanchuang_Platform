@@ -2,18 +2,21 @@
   <div class="outer-container" v-loading="isGenerating" v-bind="loadingProps">
     <div class="combined-container">
       <div class="content">
-        <aside :class="['left-panel', { collapsed: taskListCollapsed }]">
-          <div class="task-list">
-            <div class="toggle-icon">
-              <el-icon @click="toggleTaskList">
-                <component :is="taskListCollapsed ? 'el-icon-arrow-right' : 'el-icon-arrow-left'" />
-              </el-icon>
-            </div>
-            <h2 v-if="!taskListCollapsed">任务记录</h2>
-            <div v-if="!taskListCollapsed" class="task-counter">
+        <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
+          <button class="sidebar-toggle" @click="toggleSidebar">
+            <span class="toggle-icon">{{ sidebarCollapsed ? '▶' : '◀' }}</span>
+          </button>
+
+          <div class="sidebar-content" v-show="!sidebarCollapsed">
+            <h3>任务记录</h3>
+            
+            <!-- 任务计数器 -->
+            <div class="task-stats">
               <p>总任务数: <span class="count">{{ totalTaskCount }}</span></p>
             </div>
-            <ul v-if="!taskListCollapsed" class="task-history">
+            
+            <!-- 最近任务列表 -->
+            <ul class="task-list">
               <li 
                 v-for="(task, index) in recentTasks" 
                 :key="index" 
@@ -85,6 +88,7 @@ import { ElIcon } from 'element-plus';
 import { ArrowRight, ArrowLeft, Delete } from '@element-plus/icons-vue';
 import { getAIResponse } from '../../apiService';
 import { useLoading, defaultLoadingConfig, getLoadingProps } from '@/utils';
+import { useSidebar } from '@/utils/sidebarMixin';
 
 export default {
   name: "NewIntegration",
@@ -106,17 +110,21 @@ export default {
     // 获取Loading配置属性
     const loadingProps = getLoadingProps(defaultLoadingConfig);
 
+    // 使用侧栏 composable
+    const { sidebarCollapsed, toggleSidebar } = useSidebar();
+
     return {
       isGenerating,
       startGenerating,
       stopGenerating,
       isLoading,
-      loadingProps
+      loadingProps,
+      sidebarCollapsed,
+      toggleSidebar
     };
   },
   data() {
     return {
-      taskListCollapsed: false,
       selectedTask: 'taskid1',
       taskid2Visible: false,
       parsedIssues: [], // 用于存储解析后的问题列表
@@ -187,10 +195,6 @@ export default {
   },
   
   methods: {
-    toggleTaskList() {
-      this.taskListCollapsed = !this.taskListCollapsed;
-    },
-    
     // 删除任务（本地列表 + 后端数据库）
     async handleDeleteTask(taskName) {
       try {
@@ -513,6 +517,8 @@ export default {
 </script>
 
 <style scoped>
+@import '../utils/sidebar.css';
+
 .outer-container {
   display: flex;
   justify-content: center;
@@ -539,116 +545,121 @@ export default {
   flex: 1;
 }
 
-.left-panel {
-  width: 200px;
-  padding: 20px;
-  border-right: 1px solid #ddd;
-  transition: width 0.3s ease;
-  position: relative;
-}
-
-.toggle-icon {
-  position: absolute;
-  top: 16px;
-  left: 12px;
-  cursor: pointer;
-  font-size: 1.6em;
-  color: #3498db;
-  transition: color 0.3s ease;
-  z-index: 10;
-}
-
-.toggle-icon:hover {
-  color: #e74c3c;
-}
-
-.task-list h2 {
-  margin: 24px 0 20px 0;
-  font-size: 1.3em;
-  text-align: center;
-  color: #333;
-  border-bottom: 2px solid rgba(0, 0, 0, 0.1);
-  padding-bottom: 12px;
-  font-weight: 600;
-  letter-spacing: 1px;
-}
-
-.left-panel.collapsed {
-  width: 40px;
-  padding: 20px 5px;
-}
-
-.task-counter {
+/* 任务列表样式 */
+.task-stats {
   background: rgba(255, 255, 255, 0.15);
-  padding: 18px;
-  border-radius: 10px;
-  margin-bottom: 20px;
+  padding: 10px;
+  border-radius: 8px;
   text-align: center;
   border: 1px solid rgba(255, 255, 255, 0.2);
+  margin-bottom: 12px;
 }
 
-.task-counter p {
+.task-stats p {
   margin: 0;
   font-size: 1.1em;
-  color: #333;
+  color: #ecf0f1;
   font-weight: 500;
 }
 
 .count {
-  font-weight: bold;
-  font-size: 1.4em;
+  font-weight: 800;
   color: #f39c12;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
-.task-history {
+.task-list {
   list-style: none;
   padding: 0;
   margin: 0;
-  flex: 1;
   overflow-y: auto;
-  max-height: 300px;
+  max-height: 400px;
 }
 
 .task-item {
-  padding: 12px;
+  padding: 10px;
   margin-bottom: 10px;
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   border-left: 4px solid #3498db;
+  cursor: pointer;
   transition: all 0.2s;
-  border: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 .task-item:hover {
-  background: rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.18);
   border-left-color: #e74c3c;
   transform: translateX(2px);
 }
 
+.task-item.active {
+  background: rgba(255, 255, 255, 0.22);
+  border-left-color: #f39c12;
+}
+
 .task-name {
   font-size: 0.95em;
-  display: block;
-  word-wrap: break-word;
-  line-height: 1.4;
-  color: #333;
+  color: #ecf0f1;
   font-weight: 500;
 }
 
-.task-item.active {
-  background: rgba(52, 152, 219, 0.15);
+.task-name.h1 { 
+  font-weight: 700; 
 }
 
-.parent-row { display:flex; align-items:center; gap:8px; justify-content: space-between; }
-.task-name.h1 { font-weight:700; }
-.delete-icon { color:#c0392b; cursor:pointer; }
-.delete-icon:hover { color:#e74c3c; }
-.subtasks-list { margin-top:10px; }
-.sub-task-header { font-size: 0.9em; color:#666; margin-bottom:6px; }
-.dynamic-task-button { width:100%; padding:10px 12px; border-radius:6px; cursor:pointer; border-left:4px solid #3498db; background:#fff; display:flex; justify-content:space-between; align-items:center; }
-.dynamic-task-button:hover { background:#f7f7f7; }
-.dynamic-task-button.active { background:#e8f4ff; }
-.dynamic-task-button .task-text { flex:1; text-align:left; }
+.parent-row { 
+  display: flex; 
+  align-items: center; 
+  gap: 8px; 
+  justify-content: space-between; 
+}
+
+.delete-icon { 
+  color: #c0392b; 
+  cursor: pointer; 
+}
+
+.delete-icon:hover { 
+  color: #e74c3c; 
+}
+
+.subtasks-list { 
+  margin-top: 10px; 
+}
+
+.sub-task-header { 
+  font-size: 0.9em; 
+  color: #bdc3c7; 
+  margin-bottom: 6px; 
+}
+
+.dynamic-task-button { 
+  width: 100%; 
+  padding: 8px 10px; 
+  border-radius: 6px; 
+  cursor: pointer; 
+  border-left: 4px solid #3498db; 
+  background: rgba(255, 255, 255, 0.1); 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  margin-bottom: 4px;
+  border: none;
+  color: #ecf0f1;
+}
+
+.dynamic-task-button:hover { 
+  background: rgba(255, 255, 255, 0.15); 
+}
+
+.dynamic-task-button.active { 
+  background: rgba(52, 152, 219, 0.3); 
+  border-left-color: #f39c12;
+}
+
+.dynamic-task-button .task-text { 
+  flex: 1; 
+  text-align: left; 
+}
 
 .ai-box { background:#fff; border:1px solid #ddd; border-radius:6px; padding:12px; white-space:pre-wrap; }
 .ai-points { list-style: none; padding-left: 0; margin: 0; }
@@ -724,17 +735,13 @@ export default {
   transform: scale(1.05);
 }
 
-/* 兼容折叠状态的样式 */
-.left-panel.collapsed .task-counter,
-.left-panel.collapsed .task-history {
-  display: none;
-}
-
-.left-panel.collapsed h2 {
-  display: none;
-}
-
-.left-panel.collapsed .toggle-icon {
-  left: 16px;
+/* 响应式 */
+@media (max-width: 768px) {
+  .content { 
+    flex-direction: column; 
+  }
+  .main-content { 
+    padding-left: 0; 
+  }
 }
 </style>
