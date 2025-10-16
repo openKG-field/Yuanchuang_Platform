@@ -677,11 +677,11 @@ export default {
       const taskNumber = index + 1;
       
       return `**Status:** ${status}  
-**Userid:** ${userId}  
-**Taskid:** 任务${taskNumber}  
-**startTime:** ${this.currentTime}  
-**taskContent:** ${this.taskDetails.area || '暂无内容'}`;
-    },
+        **Userid:** ${userId}  
+        **Taskid:** 任务${taskNumber}  
+        **startTime:** ${this.currentTime}  
+        **taskContent:** ${this.taskDetails.area || '暂无内容'}`;
+            },
     
     /**
      * 保存到数据库
