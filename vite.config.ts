@@ -92,10 +92,27 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true
       },
+      // 统一走本地后端，由后端转发到上游模型服务并处理鉴权
       '/api/ai': {
-        target: 'https://openai.qiniu.com',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/ai/, '/v1/chat/completions')
+        target: 'http://localhost:3000',
+        changeOrigin: true
+      },
+      // 明确转发新增 AI/子任务/问题相关接口，避免 404
+      '/api/ai/decompose-subtasks': {
+        target: 'http://localhost:3000',
+        changeOrigin: true
+      },
+      '/api/ai/analyze-task-problems': {
+        target: 'http://localhost:3000',
+        changeOrigin: true
+      },
+      '/api/sub-tasks': {
+        target: 'http://localhost:3000',
+        changeOrigin: true
+      },
+      '/api/task-problems': {
+        target: 'http://localhost:3000',
+        changeOrigin: true
       },
       '/api/save-visualization-assessment': {
         target: 'http://localhost:3000',
