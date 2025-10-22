@@ -273,6 +273,28 @@ function setupDatabaseConnection() {
           console.log('plan_versions 字段添加成功或已存在');
         }
       });
+      // 新增：为复杂任务拆解扩展字段
+      db.execute(`ALTER TABLE task_manager_content ADD COLUMN complexity VARCHAR(20)`, (e3) => {
+        if (e3 && e3.code !== 'ER_DUP_FIELDNAME') {
+          console.warn('添加 complexity 字段失败:', e3.message);
+        } else {
+          console.log('complexity 字段添加成功或已存在');
+        }
+      });
+      db.execute(`ALTER TABLE task_manager_content ADD COLUMN sub_tasks_json JSON`, (e4) => {
+        if (e4 && e4.code !== 'ER_DUP_FIELDNAME') {
+          console.warn('添加 sub_tasks_json 字段失败:', e4.message);
+        } else {
+          console.log('sub_tasks_json 字段添加成功或已存在');
+        }
+      });
+      db.execute(`ALTER TABLE task_manager_content ADD COLUMN sub_tasks_count INT DEFAULT 0`, (e5) => {
+        if (e5 && e5.code !== 'ER_DUP_FIELDNAME') {
+          console.warn('添加 sub_tasks_count 字段失败:', e5.message);
+        } else {
+          console.log('sub_tasks_count 字段添加成功或已存在');
+        }
+      });
     });
 
     db.execute(createNewIntegrationTable, (err) => {
@@ -342,6 +364,55 @@ function setupDatabaseConnection() {
         console.error('创建final_result_expanded表失败:', err);
       } else {
         console.log('final_result_expanded表创建成功或已存在');
+      }
+    });
+
+    // 新增：子任务表（存放 TaskManager 拆解的 1-5 个子任务）
+    const createSubTasksTable = `
+      CREATE TABLE IF NOT EXISTS sub_tasks (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        task_name VARCHAR(100) NOT NULL,
+        sub_task_name VARCHAR(200) NOT NULL,
+        description TEXT,
+        difficulty ENUM('easy','medium','hard') DEFAULT 'medium',
+        task_order INT NOT NULL,
+        status ENUM('pending','completed') DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_sub_tasks_task (task_name),
+        INDEX idx_sub_tasks_order (task_order)
+      )
+    `;
+    db.execute(createSubTasksTable, (err) => {
+      if (err) {
+        console.error('创建 sub_tasks 表失败:', err);
+      } else {
+        console.log('sub_tasks 表创建成功或已存在');
+      }
+    });
+
+    // 新增：子任务问题表（按子任务分组的问题清单）
+    const createTaskProblemsTable = `
+      CREATE TABLE IF NOT EXISTS task_problems (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        task_name VARCHAR(100) NOT NULL,
+        sub_task_id INT,
+        sub_task_name VARCHAR(200),
+        problem_description TEXT NOT NULL,
+        is_critical BOOLEAN DEFAULT FALSE,
+        is_selected BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_tp_task (task_name),
+        INDEX idx_tp_sub (sub_task_id),
+        CONSTRAINT fk_tp_sub FOREIGN KEY (sub_task_id) REFERENCES sub_tasks(id) ON DELETE CASCADE
+      )
+    `;
+    db.execute(createTaskProblemsTable, (err) => {
+      if (err) {
+        console.error('创建 task_problems 表失败:', err);
+      } else {
+        console.log('task_problems 表创建成功或已存在');
       }
     });
   });
@@ -640,6 +711,9 @@ function setupDatabaseConnection() {
         db.promise().execute('DELETE FROM ai_content WHERE task_name = ?', [decodedName]),
         // TaskManager 内容（含 plan_*）
         db.promise().execute('DELETE FROM task_manager_content WHERE task_name = ?', [decodedName]),
+        // 子任务与问题
+        db.promise().execute('DELETE FROM task_problems WHERE task_name = ?', [decodedName]),
+        db.promise().execute('DELETE FROM sub_tasks WHERE task_name = ?', [decodedName]),
         // NewIntegration 分析（先删 results 外键依赖）
         db.promise().execute('DELETE FROM results_solutions WHERE task_name = ?', [decodedName]),
         db.promise().execute('DELETE FROM new_integration_analysis WHERE task_name = ?', [decodedName]),
@@ -1639,7 +1713,9 @@ function setupDatabaseConnection() {
       if (!Array.isArray(messages)) {
         return res.status(400).json({ success: false, message: 'messages 必须为数组' });
       }
-      const auth = req.headers['authorization'];
+      // 优先使用前端传入的 Authorization；否则使用服务端环境变量中的密钥
+      const serverKey = process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || process.env.QINIU_OPENAI_KEY;
+      const auth = req.headers['authorization'] || (serverKey ? `Bearer ${serverKey}` : undefined);
       const upstreamBody = JSON.stringify({
         model: model || 'deepseek-v3',
         messages,
@@ -1687,7 +1763,8 @@ function setupDatabaseConnection() {
       if (!Array.isArray(messages)) {
         return res.status(400).json({ success: false, message: 'messages 必须为数组' });
       }
-      const auth = req.headers['authorization'];
+  const serverKey = process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || process.env.QINIU_OPENAI_KEY;
+  const auth = req.headers['authorization'] || (serverKey ? `Bearer ${serverKey}` : undefined);
       // 设置 SSE 头
       res.set({
         'Content-Type': 'text/event-stream',
@@ -1739,6 +1816,258 @@ function setupDatabaseConnection() {
         res.write(`data: {"error":"${error.message}"}\n\n`);
       } catch (_) {}
       res.end();
+    }
+  });
+
+  // ========== 复杂任务：子任务拆解与问题分析接口 ==========
+  // 子任务拆解（基于 Template 数据+任务名）
+  app.post('/api/ai/decompose-subtasks', async (req, res) => {
+    try {
+      const { taskName, templateData } = req.body || {};
+      if (!taskName) return res.status(400).json({ success: false, message: '缺少 taskName' });
+  const serverKey = process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || process.env.QINIU_OPENAI_KEY;
+  const auth = req.headers['authorization'] || (serverKey ? `Bearer ${serverKey}` : undefined);
+      const messages = [
+        {
+          role: 'system',
+          content: `你是一个专业的任务拆解专家。根据问题复杂度，将任务拆解成1-5个子任务。\n\n拆解原则：\n- 简单问题：1个子任务（直接可执行）\n- 中等问题：2-3个子任务（需要分步骤）\n- 复杂问题：4-5个子任务（涉及多个领域）\n\n每个子任务包含：name(<=10字)、description(<=50字)、difficulty(easy|medium|hard)。\n\n只返回严格 JSON：{ \\"complexity\\": \\"simple|medium|complex\\", \\"subTasks\\": [{\"name\":\"\",\"description\":\"\",\"difficulty\":\"medium\"}] }`
+        },
+        {
+          role: 'user',
+          content: `问题：${taskName}\n\n模板信息：\n解决方案：${templateData?.area || ''}\n目标受众：${templateData?.audience || ''}\n内容：${templateData?.prompt || ''}\n\n请拆解子任务。`
+        }
+      ];
+
+      const https = require('https');
+      const upstreamBody = JSON.stringify({ model: 'deepseek-v3', messages, max_tokens: 1200 });
+      const options = {
+        hostname: 'openai.qiniu.com',
+        path: '/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(upstreamBody),
+          ...(auth ? { 'Authorization': auth } : {})
+        }
+      };
+
+      const upstreamReq = https.request(options, (upRes) => {
+        let raw = '';
+        upRes.on('data', chunk => raw += chunk);
+        upRes.on('end', () => {
+          if (upRes.statusCode && upRes.statusCode >= 400) {
+            return res.status(upRes.statusCode).json({ success:false, message:'上游错误', status: upRes.statusCode, body: raw });
+          }
+          try {
+            const parsed = JSON.parse(raw);
+            const content = parsed?.choices?.[0]?.message?.content || '{}';
+            // 兼容大模型可能带解释文字，截取第一个 JSON 块
+            const match = content.match(/\{[\s\S]*\}/);
+            const json = JSON.parse(match ? match[0] : content);
+            return res.json(json);
+          } catch (e) {
+            return res.status(502).json({ success:false, message:'解析上游响应失败', raw });
+          }
+        });
+      });
+      upstreamReq.on('error', (err) => {
+        console.error('decompose-subtasks 上游错误:', err.message);
+        res.status(500).json({ success:false, message: err.message });
+      });
+      upstreamReq.write(upstreamBody);
+      upstreamReq.end();
+    } catch (error) {
+      console.error('调用 /api/ai/decompose-subtasks 失败:', error);
+      res.status(500).json({ success:false, message: error.message });
+    }
+  });
+
+  // 分析所有子任务的潜在问题
+  app.post('/api/ai/analyze-task-problems', async (req, res) => {
+    try {
+      const { taskName, subTasks } = req.body || {};
+      if (!taskName || !Array.isArray(subTasks)) {
+        return res.status(400).json({ success:false, message: '缺少 taskName 或 subTasks' });
+      }
+      const list = subTasks.map((t, i) => `${i+1}. ${t.name} - ${t.description || ''}`).join('\n');
+  const serverKey = process.env.OPENAI_API_KEY || process.env.DEEPSEEK_API_KEY || process.env.QINIU_OPENAI_KEY;
+  const auth = req.headers['authorization'] || (serverKey ? `Bearer ${serverKey}` : undefined);
+      const messages = [
+        {
+          role: 'system',
+          content: `你是问题识别专家。分析每个子任务可能遇到的问题，包括：\n- 技术难点\n- 资源限制\n- 风险因素\n- 依赖关系\n- 创新挑战\n\n对每个子任务列出3-5个关键问题。\n严格返回 JSON：{\n  \"problems\": [ { \"subTaskName\": \"\", \"issues\": [\"\",\"\"], \"criticalIssues\": [0] } ]\n}`
+        },
+        {
+          role: 'user',
+          content: `主任务：${taskName}\n\n子任务：\n${list}\n\n请分析所有子任务的潜在问题，并仅以JSON返回。`
+        }
+      ];
+
+      const https = require('https');
+      const upstreamBody = JSON.stringify({ model: 'deepseek-v3', messages, max_tokens: 1500 });
+      const options = {
+        hostname: 'openai.qiniu.com',
+        path: '/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(upstreamBody),
+          ...(auth ? { 'Authorization': auth } : {})
+        }
+      };
+      const upstreamReq = https.request(options, (upRes) => {
+        let raw = '';
+        upRes.on('data', chunk => raw += chunk);
+        upRes.on('end', () => {
+          if (upRes.statusCode && upRes.statusCode >= 400) {
+            return res.status(upRes.statusCode).json({ success:false, message:'上游错误', status: upRes.statusCode, body: raw });
+          }
+          try {
+            const parsed = JSON.parse(raw);
+            const content = parsed?.choices?.[0]?.message?.content || '{}';
+            const match = content.match(/\{[\s\S]*\}/);
+            const json = JSON.parse(match ? match[0] : content);
+            return res.json(json);
+          } catch (e) {
+            return res.status(502).json({ success:false, message:'解析上游响应失败', raw });
+          }
+        });
+      });
+      upstreamReq.on('error', (err) => {
+        console.error('analyze-task-problems 上游错误:', err.message);
+        res.status(500).json({ success:false, message: err.message });
+      });
+      upstreamReq.write(upstreamBody);
+      upstreamReq.end();
+    } catch (error) {
+      console.error('调用 /api/ai/analyze-task-problems 失败:', error);
+      res.status(500).json({ success:false, message: error.message });
+    }
+  });
+
+  // 批量保存子任务
+  app.post('/api/sub-tasks/batch', async (req, res) => {
+    try {
+      const { taskName, subTasks } = req.body || {};
+      if (!taskName || !Array.isArray(subTasks) || subTasks.length === 0) {
+        return res.status(400).json({ success:false, message: '缺少 taskName 或 subTasks' });
+      }
+      // 先清空旧子任务
+      await db.promise().execute('DELETE FROM sub_tasks WHERE task_name = ?', [taskName]);
+      // 插入新子任务
+      for (let i = 0; i < subTasks.length; i++) {
+        const t = subTasks[i];
+        await db.promise().execute(
+          'INSERT INTO sub_tasks (task_name, sub_task_name, description, difficulty, task_order) VALUES (?, ?, ?, ?, ?)',
+          [taskName, t.name || '', t.description || '', t.difficulty || 'medium', i + 1]
+        );
+      }
+      // 更新 task_manager_content 摘要
+      await db.promise().execute(
+        'UPDATE task_manager_content SET sub_tasks_json = ?, sub_tasks_count = ? WHERE task_name = ?',
+        [JSON.stringify(subTasks), subTasks.length, taskName]
+      );
+      res.json({ success:true });
+    } catch (error) {
+      console.error('批量保存子任务失败:', error);
+      res.status(500).json({ success:false, message: error.message });
+    }
+  });
+
+  // 获取某任务的子任务列表
+  app.get('/api/sub-tasks/:taskName', async (req, res) => {
+    try {
+      const { taskName } = req.params;
+      const decoded = decodeURIComponent(taskName);
+      const [rows] = await db.promise().execute(
+        'SELECT * FROM sub_tasks WHERE task_name = ? ORDER BY task_order',
+        [decoded]
+      );
+      res.json({ success:true, subTasks: rows });
+    } catch (error) {
+      console.error('获取子任务失败:', error);
+      res.status(500).json({ success:false, message: error.message });
+    }
+  });
+
+  // 批量保存问题清单
+  app.post('/api/task-problems/batch', async (req, res) => {
+    try {
+      const { taskName, problems } = req.body || {};
+      if (!taskName || !Array.isArray(problems)) {
+        return res.status(400).json({ success:false, message: '缺少 taskName 或 problems' });
+      }
+      // 获取子任务映射
+      const [subs] = await db.promise().execute('SELECT id, sub_task_name FROM sub_tasks WHERE task_name = ?', [taskName]);
+      const map = Object.create(null);
+      subs.forEach(r => { map[r.sub_task_name] = r.id; });
+      // 先清空旧问题
+      await db.promise().execute('DELETE FROM task_problems WHERE task_name = ?', [taskName]);
+      // 插入
+      for (const g of problems) {
+        const subId = map[g.subTaskName] || null;
+        const issues = Array.isArray(g.issues) ? g.issues : [];
+        const criticalIdx = new Set(Array.isArray(g.criticalIssues) ? g.criticalIssues : []);
+        for (let i = 0; i < issues.length; i++) {
+          const desc = issues[i];
+          await db.promise().execute(
+            'INSERT INTO task_problems (task_name, sub_task_id, sub_task_name, problem_description, is_critical) VALUES (?, ?, ?, ?, ?)',
+            [taskName, subId, g.subTaskName || null, desc, criticalIdx.has(i)]
+          );
+        }
+      }
+      res.json({ success:true });
+    } catch (error) {
+      console.error('批量保存问题失败:', error);
+      res.status(500).json({ success:false, message: error.message });
+    }
+  });
+
+  // 获取问题清单（按子任务分组）
+  app.get('/api/task-problems/:taskName', async (req, res) => {
+    try {
+      const { taskName } = req.params;
+      const decoded = decodeURIComponent(taskName);
+      const [rows] = await db.promise().execute(
+        'SELECT * FROM task_problems WHERE task_name = ? ORDER BY sub_task_id, id',
+        [decoded]
+      );
+      const grouped = {};
+      for (const r of rows) {
+        const key = r.sub_task_name || '未分组';
+        (grouped[key] = grouped[key] || []).push({
+          id: r.id,
+          description: r.problem_description,
+          isCritical: !!r.is_critical,
+          isSelected: !!r.is_selected
+        });
+      }
+      res.json({ success:true, problems: grouped });
+    } catch (error) {
+      console.error('获取问题清单失败:', error);
+      res.status(500).json({ success:false, message: error.message });
+    }
+  });
+
+  // 更新问题选中状态（仅设置传入ID为选中，其余清空；作用域限定在 taskName）
+  app.put('/api/task-problems/selection', async (req, res) => {
+    try {
+      const { selectedIds, taskName } = req.body || {};
+      if (!taskName) return res.status(400).json({ success:false, message: '缺少 taskName' });
+      const ids = Array.isArray(selectedIds) ? selectedIds : [];
+      // 先清空该任务所有 is_selected
+      await db.promise().execute('UPDATE task_problems SET is_selected = FALSE WHERE task_name = ?', [taskName]);
+      if (ids.length > 0) {
+        const placeholders = ids.map(() => '?').join(',');
+        await db.promise().execute(
+          `UPDATE task_problems SET is_selected = TRUE WHERE id IN (${placeholders})`,
+          ids
+        );
+      }
+      res.json({ success:true });
+    } catch (error) {
+      console.error('更新问题选中状态失败:', error);
+      res.status(500).json({ success:false, message: error.message });
     }
   });
 
