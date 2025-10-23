@@ -107,7 +107,8 @@ export default {
       answerContent: "", // 流式返回的完整回复内容
       streaming: false, // 标记是否正在流式接收数据
       isThinking: false, // 标记AI是否正在思考
-      API_URL: "/api/ai", // 使用AI专用代理路径
+  // 使用后端的流式代理端点；后端会将上游 SSE 原样转发
+  API_URL: "/api/combined-plan/stream",
       historyTasks: [], // 历史任务列表
       currentTask: null, // 当前任务
       currentTaskId: null, // 当前任务的数据库ID
@@ -173,7 +174,8 @@ export default {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${import.meta.env.VITE_API_KEY}`,
+              // 前端可选提供 key；后端也有服务端环境变量兜底
+              'Authorization': `Bearer ${import.meta.env.VITE_API_KEY || localStorage.getItem('API_KEY') || ''}`,
               'Accept': 'text/event-stream'
             },
             body: JSON.stringify({
@@ -196,46 +198,50 @@ export default {
             throw new Error(errorMessage);
           }
 
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          
-          let aiResponse = { 
-            id: this.nextMessageId++,
-            text: '', 
-            sender: 'AI' 
-          };
+          // 如果不是流式（例如后端/上游返回了JSON），走非流式兜底
+          const ct = response.headers.get('content-type') || '';
+          if (!response.body || ct.includes('application/json')) {
+            const data = await response.json();
+            const full = data?.choices?.[0]?.message?.content || '';
+            const aiResponse = { id: this.nextMessageId++, text: full, sender: 'AI' };
+            this.messages.push(aiResponse);
+            if (aiResponse.text.trim()) {
+              await this.saveMessageToDatabase(aiResponse);
+            }
+          } else {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
 
-          let buffer = '';
+            let aiResponse = { id: this.nextMessageId++, text: '', sender: 'AI' };
+            let buffer = '';
 
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              const remainingLines = buffer.split('\n').filter(line => line.trim());
-              for (const line of remainingLines) {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) {
+                const remainingLines = buffer.split('\n').filter(line => line.trim());
+                for (const line of remainingLines) {
+                  this.processLine(line, aiResponse);
+                }
+                // 保存AI回复到数据库
+                if (aiResponse.text.trim()) {
+                  await this.saveMessageToDatabase(aiResponse);
+                  const msgIndex = this.messages.findIndex(msg => msg.id === aiResponse.id);
+                  if (msgIndex !== -1) {
+                    this.messages[msgIndex].dbId = aiResponse.dbId;
+                  }
+                }
+                break;
+              }
+
+              const chunk = decoder.decode(value, { stream: true });
+              buffer += chunk;
+
+              const lines = buffer.split('\n');
+              buffer = lines.pop();
+
+              for (const line of lines) {
                 this.processLine(line, aiResponse);
               }
-              
-              // 保存AI回复到数据库
-              if (aiResponse.text.trim()) {
-                await this.saveMessageToDatabase(aiResponse);
-                
-                // 确保messages数组中的对应消息也有dbId
-                const msgIndex = this.messages.findIndex(msg => msg.id === aiResponse.id);
-                if (msgIndex !== -1) {
-                  this.messages[msgIndex].dbId = aiResponse.dbId;
-                }
-              }
-              break;
-            }
-
-            const chunk = decoder.decode(value);
-            buffer += chunk;
-
-            const lines = buffer.split('\n');
-            buffer = lines.pop();
-
-            for (const line of lines) {
-              this.processLine(line, aiResponse);
             }
           }
 
