@@ -671,7 +671,7 @@ export default {
     async loadConversations() {
       this.loading = true;
       try {
-        const response = await fetch('http://localhost:3000/api/conversations', {
+  const response = await fetch('/api/conversations', {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
@@ -705,7 +705,7 @@ export default {
     // 新增：加载AI内容
     async loadAiContents() {
       try {
-        const response = await fetch('http://localhost:3000/api/ai-content', {
+  const response = await fetch('/api/ai-content', {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
@@ -731,7 +731,7 @@ export default {
     // 新增：加载TaskManager内容
     async loadTaskManagerContents() {
       try {
-        const response = await fetch('http://localhost:3000/api/task-manager-content', {
+  const response = await fetch('/api/task-manager-content', {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
@@ -756,7 +756,7 @@ export default {
     // 新增：加载Integration Analysis内容
     async loadIntegrationAnalysis() {
       try {
-        const response = await fetch('http://localhost:3000/api/integration-analysis', {
+  const response = await fetch('/api/integration-analysis', {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
@@ -782,7 +782,7 @@ export default {
     // 新增：加载Results Solutions内容
     async loadResultsSolutions() {
       try {
-        const response = await fetch('http://localhost:3000/api/results-solutions', {
+  const response = await fetch('/api/results-solutions', {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
@@ -809,7 +809,7 @@ export default {
     // 新增：加载Visualization Assessments内容
     async loadVisualizationAssessments() {
       try {
-        const response = await fetch('http://localhost:3000/api/visualization-assessments', {
+  const response = await fetch('/api/visualization-assessments', {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
