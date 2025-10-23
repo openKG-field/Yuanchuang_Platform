@@ -68,10 +68,23 @@
             </div>
           </div>
           <div class="section">
-            <h3>可能涉及的问题</h3>
-            <ul class="issues-list">
-              <li v-for="(issue, index) in displayIssues" :key="index">{{ issue }}</li>
-            </ul>
+            <h3>问题清单（按子任务分组）</h3>
+            <div v-if="problemsLoading">加载中…</div>
+            <template v-else>
+              <div v-if="!hasProblems">暂无数据</div>
+              <div v-for="(items, subName) in groupedProblems" :key="subName" class="problem-group">
+                <h4 class="subtask-title">{{ subName }}</h4>
+                <ul class="issues-list">
+                  <li v-for="pb in items" :key="pb.id">
+                    <label>
+                      <input type="checkbox" :value="pb.id" v-model="selectedProblemIds" />
+                      <span class="problem-text">{{ pb.problem_description }}</span>
+                      <span v-if="pb.is_critical" class="tag-critical">关键</span>
+                    </label>
+                  </li>
+                </ul>
+              </div>
+            </template>
           </div>
           <!-- 确认按钮 -->
           <div class="continue-button">
@@ -140,6 +153,10 @@ export default {
       aiLoading: false,
       // AI 要点选择
       selectedAiPoints: [],
+      // 问题清单
+      problemsLoading: false,
+      groupedProblems: {}, // { sub_task_name: [{id,problem_description,is_critical,is_selected}]} 
+      selectedProblemIds: [],
     };
   },
   computed: {
@@ -177,9 +194,13 @@ export default {
     },
     // 展示用问题列表：仅显示“AI要点中被选中的项”；未选择时为空
     displayIssues() {
+      // 已不在页面展示，仅保留兼容逻辑
       const extras = Array.isArray(this.selectedAiPoints) ? this.selectedAiPoints : [];
       const set = new Set(extras.map(s => String(s).trim()));
       return Array.from(set).filter(Boolean);
+    },
+    hasProblems() {
+      return Object.keys(this.groupedProblems || {}).length > 0;
     }
   },
   created() {
@@ -192,9 +213,25 @@ export default {
     this.getCurrentTaskName();
   // 按任务加载三个子任务
   this.loadTaskPlanFromBackend();
+  // 加载问题清单
+  this.loadProblems();
   },
   
   methods: {
+    // 统一 fetch，若 Vite 代理失败（404 或返回 HTML），回退直连后端
+    async safeFetch(input, init) {
+      const res = await fetch(input, init);
+      const needFallback = res.status === 404 || ((res.headers.get('content-type') || '').includes('text/html'));
+      if (!needFallback) return res;
+      try {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url?.startsWith('/api/')) {
+          const fallbackUrl = `http://localhost:3000${url}`;
+          return await fetch(fallbackUrl, init);
+        }
+      } catch (_) {}
+      return res;
+    },
     // 删除任务（本地列表 + 后端数据库）
     async handleDeleteTask(taskName) {
       try {
@@ -319,6 +356,45 @@ export default {
         this.aiLoading = false;
       }
     },
+    // 加载问题清单（按子任务分组），默认选中 is_selected 或 is_critical 的问题
+    async loadProblems() {
+      const taskName = this.getCurrentTaskName();
+      if (!taskName) return;
+      this.problemsLoading = true;
+      try {
+        const resp = await this.safeFetch(`/api/task-problems/${encodeURIComponent(taskName)}`);
+        if (!resp.ok) throw new Error(`加载问题失败: ${resp.status}`);
+        const data = await resp.json();
+        const groups = data?.problemsBySubTask || {};
+        this.groupedProblems = groups;
+        const defaults = [];
+        for (const k of Object.keys(groups)) {
+          for (const pb of groups[k]) {
+            if (pb.is_selected || pb.is_critical) defaults.push(pb.id);
+          }
+        }
+        this.selectedProblemIds = Array.from(new Set(defaults));
+      } catch (e) {
+        console.warn('加载问题清单异常:', e);
+      } finally {
+        this.problemsLoading = false;
+      }
+    },
+    // 保存当前勾选问题到后端
+    async saveProblemSelection() {
+      const taskName = this.getCurrentTaskName();
+      if (!taskName) return;
+      try {
+        const resp = await this.safeFetch('/api/task-problems/selection', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskName, selectedIds: this.selectedProblemIds })
+        });
+        if (!resp.ok) throw new Error(`保存选择失败: ${resp.status}`);
+      } catch (e) {
+        console.warn('保存选择异常:', e);
+      }
+    },
     
     /**
      * 保存分析数据到数据库
@@ -355,16 +431,25 @@ export default {
     
   async confirmAndRedirect() {
     if (this.isGenerating) return;
-        const combined = Array.from(new Set([ ...(this.selectedIssues || []), ...(this.selectedAiPoints || []) ]))
-          .map(s => String(s).trim())
-          .filter(Boolean);
-        if (combined.length === 0) {
-          alert('请选择至少一个问题！');
-          return;
+        // 根据勾选问题ID汇总问题文本
+        const idSet = new Set(this.selectedProblemIds || []);
+        const combined = [];
+        for (const k of Object.keys(this.groupedProblems || {})) {
+          for (const pb of this.groupedProblems[k]) {
+            if (idSet.has(pb.id)) combined.push(String(pb.problem_description || '').trim());
+          }
         }
+        // 合并“AI 要点”中用户手动勾选的项（可选）
+        for (const extra of (this.selectedAiPoints || [])) {
+          const t = String(extra || '').trim();
+          if (t && !combined.includes(t)) combined.push(t);
+        }
+        if (!combined.length) { alert('请选择至少一个问题！'); return; }
     
     try {
       this.startGenerating();
+          // 持久化当前勾选
+          await this.saveProblemSelection();
           // 1. 保存选中问题（不再生成 / 依赖 单一综合方案 ai_solution）
           const analysisId = await this.saveAnalysisToDatabase('', combined.join('\n'));
 
@@ -424,7 +509,7 @@ export default {
           } catch(_) {}
 
           // 5. 跳转至 Results 展示（不再需要 baseAiSolution）
-          this.$router.push({ name: 'Results', query: { analysisId, selectedIssues: combined.join('\n') } });
+          this.$router.push({ name: 'Results', query: { analysisId, selectedIssues: combined.join('\n'), taskName: this.currentTaskName } });
         } catch (e) {
           console.error('生成两个综合方案失败:', e);
           alert('生成方案失败，请重试。');
@@ -468,7 +553,7 @@ export default {
     async loadTaskPlanFromBackend() {
       const taskName = this.getCurrentTaskName();
       try {
-        const resp = await fetch(`/api/task-plan/${encodeURIComponent(taskName)}`);
+        const resp = await this.safeFetch(`/api/task-plan/${encodeURIComponent(taskName)}`);
         if (resp.ok) {
           const ct = resp.headers.get('content-type') || '';
           if (ct.includes('application/json')) {
@@ -489,6 +574,8 @@ export default {
           }
         }
       } catch (_) {}
+      // 若 task-plan 为空，尝试改用 sub-tasks
+      await this.loadPlanFromSubTasks(taskName);
       // 会话回退
       try {
         const raw = sessionStorage.getItem('taskPlan');
@@ -509,6 +596,21 @@ export default {
       } catch (e) {
         console.warn('回退加载任务规划失败:', e);
       }
+    },
+    async loadPlanFromSubTasks(taskName) {
+      try {
+        const resp = await this.safeFetch(`/api/sub-tasks/${encodeURIComponent(taskName)}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const list = Array.isArray(data?.subTasks) ? data.subTasks : [];
+        if (!list.length) return;
+        this.planTasks = list.map((r, idx) => ({
+          id: idx + 1,
+          name: r.sub_task_name,
+          content: `### ${r.sub_task_name}\n\n**难度**：${r.difficulty || 'medium'}\n\n**描述**：${r.description || '—'}`
+        }));
+        this.activePlanTaskId = this.planTasks[0]?.id || null;
+      } catch (_) {}
     }
   },
   watch: {
@@ -668,6 +770,11 @@ export default {
 
 .issues-list { list-style: disc; padding-left: 20px; }
 .issues-list li { margin: 6px 0; word-break: break-word; overflow-wrap: anywhere; }
+
+.problem-group { margin-bottom: 12px; }
+.subtask-title { font-size: 1.05em; margin: 8px 0; color: #333; }
+.problem-text { margin-left: 6px; }
+.tag-critical { display: inline-block; margin-left: 8px; font-size: 12px; color: #fff; background: #d9534f; padding: 1px 6px; border-radius: 10px; }
 
 /* 防止 AI 文本溢出或把容器拉得过大 */
 .ai-box pre {
