@@ -25,6 +25,19 @@
             <span class="task-name">{{ task }}</span>
           </li>
         </ul>
+
+        <!-- 新增：历史评估记录 -->
+        <div class="history-section" v-if="historyAssessments && historyAssessments.length">
+          <h4 style="margin-top:12px;">历史评估</h4>
+          <ul class="history-list">
+            <li v-for="(rec, i) in historyAssessments.slice(0, 10)" :key="rec.id || i" class="history-item">
+              <div class="history-line">
+                <span class="h-task">{{ rec.task_name || '未命名' }}</span>
+                <span class="h-time">{{ (rec.created_at || '').toString().slice(0,19).replace('T',' ') }}</span>
+              </div>
+            </li>
+          </ul>
+        </div>
       </div>
     </aside>
     <div class="main-content">
@@ -75,6 +88,7 @@ export default {
       radarData: [0, 0, 0, 0],
       totalTaskCount: 0, // 总任务数
       recentTasks: [], // 最近的任务列表
+      historyAssessments: [], // 历史评估列表
       finalResultTitle: '',
       finalResultContent: '',
       combinedPlanContent: ''
@@ -223,7 +237,8 @@ export default {
         if (response.ok) {
           const result = await response.json();
           console.log('历史评估数据:', result.assessments);
-          // 可以在这里处理历史数据，比如在边栏显示
+          // 保存到侧栏显示
+          this.historyAssessments = Array.isArray(result?.assessments) ? result.assessments : [];
         } else {
           console.error('获取历史评估数据失败');
         }
@@ -446,12 +461,14 @@ export default {
         const dialogPromise = user.id && taskName ? safeFetchJson(`/api/dialog-messages/${user.id}/${encode(taskName)}`) : Promise.resolve(null);
         const templatePromise = taskName ? safeFetchJson(`/api/ai-content/${encode(taskName)}`) : Promise.resolve(null);
         const taskManagerPromise = taskName ? safeFetchJson(`/api/task-manager-content/${encode(taskName)}`) : Promise.resolve(null);
+        const taskPlanPromise = taskName ? safeFetchJson(`/api/task-plan/${encode(taskName)}`) : Promise.resolve(null);
+        const taskProblemsPromise = taskName ? safeFetchJson(`/api/task-problems/${encode(taskName)}`) : Promise.resolve(null);
         const newIntegrationPromise = taskName ? safeFetchJson(`/api/integration-analysis/${encode(taskName)}`) : Promise.resolve(null);
         const resultsPromise = taskName ? safeFetchJson(`/api/results-solutions/${encode(taskName)}`) : Promise.resolve(null);
         const templateSelectionPromise = taskName ? safeFetchJson(`/api/template-selection/${encode(taskName)}`) : Promise.resolve(null);
         const finalResultPromise = taskName ? safeFetchJson(`/api/final-result-expanded/${encode(taskName)}`) : Promise.resolve(null);
-        const [dialogData, templateData, taskManagerData, integrationData, resultsData, templateSelData, finalResultData] = await Promise.all([
-          dialogPromise, templatePromise, taskManagerPromise, newIntegrationPromise, resultsPromise, templateSelectionPromise, finalResultPromise
+        const [dialogData, templateData, taskManagerData, taskPlanData, taskProblemsData, integrationData, resultsData, templateSelData, finalResultData] = await Promise.all([
+          dialogPromise, templatePromise, taskManagerPromise, taskPlanPromise, taskProblemsPromise, newIntegrationPromise, resultsPromise, templateSelectionPromise, finalResultPromise
         ]);
 
         // ============= 构建每个部分的 HTML (不包含标题，标题用 headerImage) =============
@@ -497,57 +514,75 @@ export default {
           } else templateHTML = '<p>无思考内容</p>';
         } catch(_) { templateHTML = '<p>获取模板思考失败</p>'; }
 
-        // 3. Task Manager 子任务 (task_manager_content 表) 解析 plan_tasks 优先
-        let taskMgrHTML = '';
+        // 3. Task Manager: 子任务 + 子问题 + 三框架（从 plan_tasks + versions + task_problems 聚合）
+        let tmDetailHTML = '';
         try {
-          const recordsArr = Array.isArray(taskManagerData?.taskManagerContents) ? taskManagerData.taskManagerContents
-            : (Array.isArray(taskManagerData?.records) ? taskManagerData.records
-            : (Array.isArray(taskManagerData) ? taskManagerData : []));
-          const rec = recordsArr.length ? recordsArr[recordsArr.length -1] : null;
-          if (rec) {
-            let tasksRaw = (rec?.plan_tasks !== undefined && rec?.plan_tasks !== null && rec?.plan_tasks !== '') ? rec.plan_tasks
-              : (rec?.added_tasks !== undefined ? rec.added_tasks : rec?.tasks);
-            let parsedTasks = Array.isArray(tasksRaw) ? tasksRaw : (typeof tasksRaw === 'string' ? (()=>{try{return JSON.parse(tasksRaw);}catch{return null;}})() : null);
-            // 规范化 3 个固定分析块顺序
-            if (parsedTasks && Array.isArray(parsedTasks)) {
-              const order = ['trend','system','fop'];
-              const map = new Map();
-              parsedTasks.forEach(t=>{ if(t&&t.id) map.set(String(t.id), t); });
-              const meta = { trend:'主演化（趋势分析）', system:'主系统（九宫格+因果分析）', fop:'主作用（FOP分析）' };
-              parsedTasks = order.map(id=>{
-                if(!map.has(id)) return { id, name: meta[id], content: '（该部分在生成或保存阶段缺失，已占位）' };
-                const o = map.get(id);
-                if(!o.name) o.name = meta[id];
-                if(typeof o.content !== 'string') o.content = String(o.content||'');
-                return o;
-              });
+          // 优先从 /api/task-plan 获取标准 tasks
+          let tasks = Array.isArray(taskPlanData?.tasks) ? taskPlanData.tasks : [];
+          if (!tasks || tasks.length === 0) {
+            // 回退从 task_manager_content 解析 plan_tasks
+            const recordsArr = Array.isArray(taskManagerData?.taskManagerContents) ? taskManagerData.taskManagerContents
+              : (Array.isArray(taskManagerData?.records) ? taskManagerData.records
+              : (Array.isArray(taskManagerData) ? taskManagerData : []));
+            const recFallback = recordsArr.length ? recordsArr[recordsArr.length -1] : null;
+            if (recFallback) {
+              let tasksRaw = (recFallback?.plan_tasks !== undefined && recFallback?.plan_tasks !== null && recFallback?.plan_tasks !== '') ? recFallback.plan_tasks
+                : (recFallback?.added_tasks !== undefined ? recFallback.added_tasks : recFallback?.tasks);
+              tasks = Array.isArray(tasksRaw) ? tasksRaw : (typeof tasksRaw === 'string' ? (()=>{try{return JSON.parse(tasksRaw);}catch{return [];} })() : []);
             }
-            const details = rec?.task_details;
-            const parsedDetails = typeof details === 'string' ? (()=>{try{return JSON.parse(details);}catch{return null;}})() : details;
-            let body = '';
-            if (parsedTasks && Array.isArray(parsedTasks) && parsedTasks.length) {
-              const hasContent = parsedTasks.some(t => t && (t.content || t.description));
-              if (hasContent) {
-                body += '<div style=\"font-size:13px;\">';
-                parsedTasks.forEach((t,i)=>{
-                  const name = esc(t?.name || t?.title || `子任务${i+1}`);
-                  const content = esc(t?.content || t?.description || '');
-                  body += `<div style=\\"margin:8px 0;\\"><strong>${name}</strong>`+
-                    (content?`<pre style=\\"white-space:pre-wrap;font-size:12px;margin:4px 0 0;\\">${content}</pre>`:'')+
-                    '</div>';
-                });
-                body += '</div>';
-              } else {
-                body += '<ol style=\"padding-left:20px;\">' + parsedTasks.map(t=>`<li>${esc(t?.title||t?.name||t)}</li>`).join('') + '</ol>';
-              }
+          }
+          if (!Array.isArray(tasks) || tasks.length === 0) {
+            tmDetailHTML = '<p>无子任务数据</p>';
+          } else {
+            // 获取每个子任务的版本历史（以便拿到三种框架的最新内容）
+            const versionsMap = {};
+            await Promise.all((tasks || []).map(async (t) => {
+              const subId = String(t.id);
+              const v = await safeFetchJson(`/api/task-plan/${encode(taskName)}/versions?subTaskId=${encode(subId)}`);
+              versionsMap[subId] = Array.isArray(v?.versions) ? v.versions : [];
+            }));
+            const groupedProblems = taskProblemsData?.problems || {};
+            const renderMd = (md) => (md && typeof md === 'string') ? marked.parse(md) : '';
+            const pickByNote = (arr, keyword) => {
+              if (!Array.isArray(arr)) return null;
+              const filt = arr.filter(e => (e?.note || '').includes(keyword));
+              return filt.length ? filt[filt.length - 1] : null;
+            };
+            const sectionParts = [];
+            for (let i = 0; i < tasks.length; i++) {
+              const t = tasks[i] || {};
+              const subId = String(t.id);
+              const subName = esc(t.name || t.title || `子任务${i+1}`);
+              const vlist = versionsMap[subId] || [];
+              const vTrend = pickByNote(vlist, '主演化');
+              const vSystem = pickByNote(vlist, '主系统');
+              const vFop = pickByNote(vlist, '主作用');
+              // 回退：若没有对应版本，用当前内容兜底
+              const trendHtml = renderMd(vTrend?.content || t.content || '');
+              const systemHtml = renderMd(vSystem?.content || '');
+              const fopHtml = renderMd(vFop?.content || '');
+              // 子问题（按名称分组）
+              const pList = Array.isArray(groupedProblems[t.name]) ? groupedProblems[t.name] : [];
+              const problemsHtml = pList.length
+                ? ('<ul style="margin:6px 0 8px 18px;">' + pList.map(p => {
+                    const flags = [p.isCritical ? '关键' : null, p.isSelected ? '已选' : null].filter(Boolean).join('/');
+                    return `<li>${esc(p.description)}${flags ? ` <em style=\"color:#c00;\">(${flags})</em>` : ''}</li>`;
+                  }).join('') + '</ul>')
+                : '<p style="margin:6px 0;">（无已识别子问题）</p>';
+              sectionParts.push(
+                `<div style="margin:12px 0 18px;">`+
+                  `<h4 style=\"margin:0 0 6px 0;\">${subName}</h4>`+
+                  `<div style=\"margin:4px 0;\"><strong>子问题：</strong>${problemsHtml}</div>`+
+                  `<div style=\"margin:8px 0;\"><strong>主演化（趋势分析）</strong><div>${trendHtml || '<p>（暂无）</p>'}</div></div>`+
+                  `<div style=\"margin:8px 0;\"><strong>主系统（九宫格+因果分析）</strong><div>${systemHtml || '<p>（暂无）</p>'}</div></div>`+
+                  `<div style=\"margin:8px 0;\"><strong>主作用（FOP分析）</strong><div>${fopHtml || '<p>（暂无）</p>'}</div></div>`+
+                `</div>`
+              );
             }
-            if (parsedDetails && typeof parsedDetails==='object' && Object.keys(parsedDetails).length) {
-              body += Object.keys(parsedDetails).map(k=>`<div style=\"margin-bottom:6px;\"><strong>${esc(k)}:</strong> ${esc(parsedDetails[k])}</div>`).join('');
-            }
-            if (rec?.ai_response) body += `<pre style=\"white-space:pre-wrap;font-size:13px;\">${esc(rec.ai_response)}</pre>`;
-            taskMgrHTML = body || '<p>无子任务数据</p>';
-          } else taskMgrHTML = '<p>无子任务数据</p>';
-        } catch(_) { taskMgrHTML = '<p>获取子任务失败</p>'; }
+            tmDetailHTML = sectionParts.join('');
+            if (!tmDetailHTML) tmDetailHTML = '<p>无子任务数据</p>';
+          }
+        } catch(_) { tmDetailHTML = '<p>获取子任务/问题/框架失败</p>'; }
 
         // 4. NewIntegration 分析 (new_integration_analysis) {success:true, analysisRecords:[...]}
         let integrationHTML = '';
@@ -613,7 +648,7 @@ export default {
         const sectionList = [
           { title:'对话记录', html: dialogHTML },
           { title:'Template 思考内容', html: templateHTML },
-          { title:'Task-Manager 子任务与回复', html: taskMgrHTML },
+          { title:'子任务、子问题与三框架（Task-Manager）', html: tmDetailHTML },
           { title:'问题分析与选择 (NewIntegration)', html: integrationHTML },
           { title:'两个解决方案 (Results)', html: resultsHTML },
           { title:'方案创新方法对比 (Template-Selection)', html: tplSelHTML },
