@@ -57,6 +57,19 @@
           <div v-show="aiPanelExpanded" class="ai-content">
             <!-- 编辑/浏览模式切换 -->
             <div v-if="activePlanTaskId">
+              <!-- 框架切换：主演化/主系统/主作用 -->
+              <div class="framework-tabs">
+                <button
+                  v-for="opt in frameworkOptions"
+                  :key="opt.key"
+                  class="tab-btn"
+                  :class="{ active: selectedFramework === opt.key }"
+                  :disabled="frameworkLoading"
+                  @click="switchFramework(opt.key)"
+                >{{ opt.label }}</button>
+                <span class="tab-spacer" />
+                <span v-if="frameworkLoading" style="color:#888;font-size:12px;">自动生成中…</span>
+              </div>
               <div v-if="!isEditingPlan">
                 <VueMarkdownIt v-if="currentPlanContent" class="ai-text" :source="currentPlanContent" />
                 <div style="margin-top:12px; display:flex; gap:8px;">
@@ -85,7 +98,9 @@
         </div>
         
         <footer class="right-footer">
-          <button class="continue-button" @click="handleContinue">继续</button>
+          <button class="continue-button" :disabled="isAnalyzing || isDecomposing" @click="handleContinue">
+            {{ isAnalyzing ? 'AI 正在分析…' : '继续' }}
+          </button>
         </footer>
       </section>
     </main>
@@ -103,9 +118,9 @@ export default {
     ElIcon,
     'el-icon-arrow-right': ArrowRight,
     'el-icon-arrow-left': ArrowLeft,
-  'el-icon-arrow-down': ArrowDown,
-  'el-icon-arrow-up': ArrowUp,
-    VueMarkdownIt
+    'el-icon-arrow-down': ArrowDown,
+    'el-icon-arrow-up': ArrowUp,
+      VueMarkdownIt
   },
   data() {
     return {
@@ -135,9 +150,22 @@ export default {
   taskPlan: null,
   planTasks: [], // [{id,name,content}]
   activePlanTaskId: null,
+  // 框架与内容缓存
+  selectedFramework: 'trend',
+  frameworkOptions: [
+    { key: 'trend', label: '主演化（趋势分析）' },
+    { key: 'system', label: '主系统（九宫格+因果）' },
+    { key: 'fop', label: '主作用（FOP分析）' }
+  ],
+  frameworkLoading: false,
+  contentCache: {}, // { [subTaskId]: { trend: md, system: md, fop: md } }
   // 编辑态
   isEditingPlan: false,
-  editablePlanContent: ''
+  editablePlanContent: '',
+  // 新增：AI 拆解与分析状态/数据
+  isDecomposing: false,
+  isAnalyzing: false,
+  subTasksRaw: []
     };
   },
   computed: {
@@ -145,8 +173,14 @@ export default {
     // 现在使用 generateTaskMarkdown 方法动态生成
     currentPlanContent() {
       if (!this.planTasks || !this.activePlanTaskId) return '';
+      const cached = this.contentCache?.[this.activePlanTaskId]?.[this.selectedFramework];
+      if (cached) return cached;
       const found = this.planTasks.find(t => t.id === this.activePlanTaskId);
       return found?.content || '';
+    },
+    hasFrameworkContent() {
+      if (!this.activePlanTaskId) return false;
+      return !!(this.contentCache?.[this.activePlanTaskId]?.[this.selectedFramework]);
     }
   },
   mounted() {
@@ -179,6 +213,10 @@ export default {
 
   // 优先从后端加载持久化的任务规划，失败再回退session
   this.loadTaskPlanFromBackend();
+  // 拆解/加载子任务（后端优先）
+  this.ensureSubTasks();
+  // 若已有活动子任务，自动尝试加载/生成当前框架内容
+  this.$nextTick(() => { this.ensureAllFrameworkContents(); });
   },
   
   // 组件激活时（从其他路由返回时）
@@ -208,6 +246,9 @@ export default {
   this.loadTaskData(taskName);
   // 重新同步任务规划（后端优先）
   this.loadTaskPlanFromBackend();
+  // 重新确保子任务存在
+  this.ensureSubTasks();
+  this.$nextTick(() => { this.ensureAllFrameworkContents(); });
   },
   
   beforeUnmount() {
@@ -260,30 +301,156 @@ export default {
       }
       return issues.slice(0, 12);
     },
-    // 恢复“继续”按钮逻辑：不依赖 AI，直接把要点传给 NewIntegration
-    handleContinue() {
-      const issues = this.buildIssuesFromPlan();
-      const payload = (issues.length ? issues : ['请先完善任务要点']).join('\n');
-      // 将当前任务名一并传递，便于 NewIntegration 按任务加载对应的三个子任务
-      const currentTask = this.getCurrentTaskName();
-      this.$router.push({
-        name: 'NewIntegration',
-        query: { issues: payload, currentTask }
-      });
+    // 点击继续：保存子任务 → AI 分析问题 → 保存问题 → 跳转集成分析
+    async handleContinue() {
+      try {
+        const taskName = this.getCurrentTaskName();
+        // 兜底：若还未有子任务，先确保存在
+        await this.ensureSubTasks();
+        // 在继续前，为所有子任务生成并保存三种框架内容（顺序执行，保证都落库）
+        try {
+          await this.generateFrameworksForAllSubTasks();
+        } catch (e) {
+          console.warn('批量生成三框架发生问题（已忽略，后续继续流程）:', e?.message || e);
+        }
+        // 保存最新子任务到后端（幂等）
+        await this.saveSubTasksBatch(taskName);
+        // AI 分析所有子任务问题
+        await this.analyzeAndContinue(taskName);
+      } catch (e) {
+        console.error('继续流程失败:', e);
+      }
     },
     // 统一 fetch，若 Vite 代理失败（404 或返回 HTML），回退直连后端
     async safeFetch(input, init) {
-      const res = await fetch(input, init);
-      const needFallback = res.status === 404 || ((res.headers.get('content-type') || '').includes('text/html'));
-      if (!needFallback) return res;
+      let res;
+      let firstError = null;
       try {
-        const url = typeof input === 'string' ? input : input.url;
-        if (url?.startsWith('/api/')) {
+        res = await fetch(input, init);
+      } catch (err) {
+        firstError = err;
+      }
+      const url = typeof input === 'string' ? input : input.url;
+      const isApi = typeof url === 'string' && url.startsWith('/api/');
+      const shouldTryFallback = !!firstError || (res && (res.status === 404 || (res.headers.get('content-type') || '').includes('text/html')));
+      if (isApi && shouldTryFallback) {
+        try {
           const fallbackUrl = `http://localhost:3000${url}`;
           return await fetch(fallbackUrl, init);
+        } catch (_) {
+          // ignore and return original result or rethrow
         }
-      } catch (_) {}
-      return res;
+      }
+      if (res) return res;
+      throw firstError || new Error('请求失败');
+    },
+    // 为所有子任务生成&保存三种框架内容（主演化/主系统/主作用）
+    async generateFrameworksForAllSubTasks() {
+      const taskName = this.getCurrentTaskName();
+      const list = Array.isArray(this.planTasks) ? this.planTasks : [];
+      if (!list.length) return;
+      // 顺序执行，避免上游速率限制
+      for (const t of list) {
+        const subId = t.id;
+        const subName = t.name;
+        // 对每个框架逐个生成并保存
+        for (const opt of this.frameworkOptions) {
+          const fw = opt.key; // 'trend' | 'system' | 'fop'
+          // 若缓存已有则直接保存（确保版本落库）；否则调用AI生成
+          let content = (this.contentCache?.[subId]?.[fw]) || '';
+          if (!content) {
+            try {
+              content = await this.generateFrameworkForTarget(taskName, subId, subName, fw);
+            } catch (e) {
+              console.warn(`生成 ${subName} 的 ${fw} 失败，使用骨架模板兜底`);
+              content = this.buildFrameworkSkeleton(fw, taskName, subName);
+            }
+          }
+          const note = fw === 'trend' ? '主演化(趋势分析)' : fw === 'system' ? '主系统(九宫格+因果)' : '主作用(FOP分析)';
+          await this.savePlanContentFor(taskName, subId, subName, content, note);
+          // 更新本地缓存
+          this.contentCache[subId] = { ...(this.contentCache[subId] || {}), [fw]: content };
+        }
+      }
+    },
+    // 生成指定子任务与框架的内容（返回文本，不直接改UI）
+    async generateFrameworkForTarget(taskName, subId, subName, framework) {
+      const prompt = this.buildFrameworkPrompt(framework, taskName, subName);
+      const resp = await this.safeFetch('/api/ai', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_API_KEY || localStorage.getItem('API_KEY') || ''}`
+        },
+        body: JSON.stringify({ model: 'deepseek-v3', messages: [{ role:'user', content: prompt }], max_tokens: 1600 })
+      });
+      if (!resp.ok) {
+        const m = await resp.text().catch(()=> '');
+        throw new Error(`AI响应错误: ${resp.status} ${m.slice(0,200)}`);
+      }
+      const data = await resp.json();
+      const text = data?.choices?.[0]?.message?.content?.trim() || '';
+      if (!text) throw new Error('AI未返回内容');
+      return text;
+    },
+    // 直接针对目标子任务保存内容为一个版本（不依赖 UI 当前选中项）
+    async savePlanContentFor(taskName, subTaskId, subTaskName, content, note = '') {
+      try {
+        // 先尝试直接编辑
+        let resp = await this.safeFetch(`/api/task-plan/${encodeURIComponent(taskName)}/edit`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subTaskId, subTaskName, content, note })
+        });
+        let ct = resp.headers.get('content-type') || '';
+        let data = ct.includes('application/json') ? await resp.json() : null;
+        if (!resp.ok || !data?.success) {
+          // 合并已有 tasks 再回写
+          let allTasks = Array.isArray(this.planTasks) ? JSON.parse(JSON.stringify(this.planTasks)) : [];
+          try {
+            const getResp = await this.safeFetch(`/api/task-plan/${encodeURIComponent(taskName)}`);
+            if (getResp.ok) {
+              const getCt = getResp.headers.get('content-type') || '';
+              if (getCt.includes('application/json')) {
+                const getData = await getResp.json();
+                if (Array.isArray(getData.tasks) && getData.tasks.length) {
+                  allTasks = getData.tasks;
+                }
+              }
+            }
+          } catch(_) {}
+          const idx2 = allTasks.findIndex(t => String(t.id) === String(subTaskId) || t.name === subTaskName);
+          if (idx2 >= 0) {
+            allTasks[idx2] = { ...allTasks[idx2], content };
+          } else {
+            allTasks.push({ id: subTaskId, name: subTaskName || String(subTaskId), content });
+          }
+          const saveResp = await this.safeFetch('/api/task-plan/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ taskName, planTasks: allTasks })
+          });
+          const saveCt = saveResp.headers.get('content-type') || '';
+          if (saveResp.ok && saveCt.includes('application/json')) {
+            // 再次尝试编辑，写入版本
+            resp = await this.safeFetch(`/api/task-plan/${encodeURIComponent(taskName)}/edit`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ subTaskId, subTaskName, content, note })
+            });
+            ct = resp.headers.get('content-type') || '';
+            data = ct.includes('application/json') ? await resp.json() : null;
+          }
+        }
+        if (!resp.ok || !data?.success) {
+          console.warn('保存子任务版本失败:', data?.message || resp.status, subTaskName, note);
+          return false;
+        }
+        return true;
+      } catch (e) {
+        console.error('保存子任务版本异常:', subTaskName, e);
+        return false;
+      }
     },
     showPlanVersions: async function() {
       const v = await this.loadPlanVersions();
@@ -452,10 +619,261 @@ export default {
       }
       return [];
     },
+    // 切换框架
+    switchFramework(key) {
+      this.selectedFramework = key;
+      this.editablePlanContent = this.currentPlanContent;
+      this.ensureFrameworkContent();
+    },
+    // 保证当前框架有内容（缓存或生成）
+    async ensureFrameworkContent() {
+      if (!this.activePlanTaskId) return;
+      const has = this.contentCache?.[this.activePlanTaskId]?.[this.selectedFramework];
+      if (has) return;
+      // 若 plan 内已有内容且当前缓存为空，先用 plan.content 显示（避免空白）
+      const found = this.planTasks.find(t => t.id === this.activePlanTaskId);
+      if (found?.content && !has) {
+        this.contentCache[this.activePlanTaskId] = {
+          ...(this.contentCache[this.activePlanTaskId] || {}),
+          [this.selectedFramework]: found.content
+        };
+        return;
+      }
+      // 自动生成
+      await this.generateFrameworkContent(this.selectedFramework, true);
+    },
+    // 确保当前子任务三种框架内容都已生成（缺哪个补哪个）
+    async ensureAllFrameworkContents() {
+      if (!this.activePlanTaskId) return;
+      const keys = this.frameworkOptions.map(o => o.key);
+      // 先显示当前框架缓存/plan内容，提升感知
+      await this.ensureFrameworkContent();
+      // 再后台生成其余框架
+      for (const k of keys) {
+        const has = this.contentCache?.[this.activePlanTaskId]?.[k];
+        if (!has) {
+          await this.generateFrameworkContent(k, true);
+        }
+      }
+    },
+    // AI 生成框架内容
+    async generateFrameworkContent(framework, silent = false) {
+      if (!this.activePlanTaskId) return;
+      const taskName = this.getCurrentTaskName();
+      const sub = this.planTasks.find(t => t.id === this.activePlanTaskId);
+      if (!sub) return;
+      const subName = sub.name;
+      this.frameworkLoading = true;
+      try {
+        const prompt = this.buildFrameworkPrompt(framework, taskName, subName);
+        const resp = await this.safeFetch('/api/ai', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            // 前端可选提供 API Key；服务端也会使用环境变量兜底
+            'Authorization': `Bearer ${import.meta.env.VITE_API_KEY || localStorage.getItem('API_KEY') || ''}`
+          },
+          body: JSON.stringify({ model: 'deepseek-v3', messages: [{ role:'user', content: prompt }], max_tokens: 1600 })
+        });
+        let text = '';
+        if (resp.ok) {
+          const data = await resp.json();
+          text = data?.choices?.[0]?.message?.content?.trim() || '';
+        } else {
+          const m = await resp.text().catch(()=> '');
+          text = `AI响应错误: ${resp.status} ${m.slice(0,200)}`;
+        }
+        if (!text) throw new Error('AI未返回内容');
+        // 写入缓存
+        this.contentCache[this.activePlanTaskId] = {
+          ...(this.contentCache[this.activePlanTaskId] || {}),
+          [framework]: text
+        };
+        // 若生成的是当前选中的框架，更新展示
+        if (framework === this.selectedFramework) {
+          this.editablePlanContent = text;
+        }
+        const note = framework === 'trend' ? '主演化(趋势分析)'
+                  : framework === 'system' ? '主系统(九宫格+因果)'
+                  : '主作用(FOP分析)';
+        await this.saveCurrentPlanContent(note);
+      } catch (e) {
+        if (!silent) console.warn('生成框架内容失败:', e);
+        // 本地兜底模板
+        const tpl = this.buildFrameworkSkeleton(framework, taskName, subName);
+        this.contentCache[this.activePlanTaskId] = {
+          ...(this.contentCache[this.activePlanTaskId] || {}),
+          [framework]: tpl
+        };
+        if (framework === this.selectedFramework) {
+          this.editablePlanContent = tpl;
+        }
+      } finally {
+        this.frameworkLoading = false;
+      }
+    },
+    // 组装框架 Prompt
+    buildFrameworkPrompt(framework, taskName, subTaskName) {
+      const base = `主任务：${taskName}\n子任务：${subTaskName}\n`;
+      if (framework === 'trend') {
+        return base + `请进行“主演化（趋势分析）”。输出要求：\n- 技术/市场/法规/数据 等趋势要点（条目）\n- 演进路径与时间轴（阶段->关键里程碑）\n- 能力S曲线/成熟度评估（若合适）\n- 对子任务的影响与机会/风险\n- 建议行动清单\n以 Markdown 编写，使用小标题与清单。`;
+      } else if (framework === 'system') {
+        return base + `请进行“主系统（九宫格+因果分析）”。输出要求：\n- 九宫格：目标/场景/角色/资源/约束/流程/数据/指标/风险（用表格填写）\n- 因果链分析：关键因->果关系、环路与可能的杠杆点\n- 对应的干预措施与监测点\n以 Markdown 表格与列表呈现。`;
+      } else {
+        return base + `请进行“主作用（FOP分析）”。FOP=功能(Function)-对象(Object)-原理(Principle)。输出要求：\n- 功能列表（主/次要功能）\n- 每个功能的对象与作用机理/物理原理\n- 可替代原理与实现路径（优缺点对比）\n- 聚焦本子任务的推荐原理与理由\n以 Markdown 小节与表格呈现。`;
+      }
+    },
+    // 本地骨架模板（AI 失败时）
+    buildFrameworkSkeleton(framework, taskName, subTaskName) {
+      if (framework === 'trend') {
+        return `## ${subTaskName} · 主演化（趋势分析）\n\n### 关键趋势\n- 技术：\n- 市场：\n- 法规：\n- 数据：\n\n### 演进路径与时间轴\n- 阶段1：目标/里程碑\n- 阶段2：目标/里程碑\n\n### 影响与机会/风险\n- 机会：\n- 风险：\n\n### 建议行动\n- [ ] 行动A\n- [ ] 行动B`;
+      } else if (framework === 'system') {
+        return `## ${subTaskName} · 主系统（九宫格+因果）\n\n### 九宫格\n| 目标 | 场景 | 角色 |\n|---|---|---|\n|  |  |  |\n\n| 资源 | 约束 | 流程 |\n|---|---|---|\n|  |  |  |\n\n| 数据 | 指标 | 风险 |\n|---|---|---|\n|  |  |  |\n\n### 因果分析\n- 因1 -> 果1\n- 因2 -> 果2\n\n### 干预措施\n- 措施A：\n- 措施B：`;
+      } else {
+        return `## ${subTaskName} · 主作用（FOP分析）\n\n### 功能列表\n- 主功能：\n- 次要功能：\n\n### FOP 映射\n| 功能 | 对象 | 原理/机理 | 备选原理 |\n|---|---|---|---|\n|  |  |  |  |\n\n### 推荐原理与理由\n- 推荐：\n- 理由：`;
+      }
+    },
+    /**
+     * 确保子任务存在：优先从后端加载；若为空则调用 AI 拆解并保存
+     */
+    async ensureSubTasks() {
+      const taskName = this.getCurrentTaskName();
+      if (!taskName) return;
+      try {
+        // 先尝试读取已保存的子任务
+        const resp = await this.safeFetch(`/api/sub-tasks/${encodeURIComponent(taskName)}`);
+        if (resp.ok) {
+          const data = await resp.json();
+          const list = Array.isArray(data?.subTasks) ? data.subTasks : [];
+          if (list.length > 0) {
+            this.subTasksRaw = list.map((r) => ({ name: r.sub_task_name, description: r.description, difficulty: r.difficulty || 'medium' }));
+            this.planTasks = this.mapSubTasksToPlan(this.subTasksRaw);
+            this.activePlanTaskId = this.planTasks[0]?.id || null;
+            return;
+          }
+        }
+      } catch (_) {}
+      // 无数据则调用 AI 拆解
+      await this.decomposeSubTasks();
+    },
+    /**
+     * 调用 AI 拆解子任务并保存
+     */
+    async decomposeSubTasks() {
+      const taskName = this.getCurrentTaskName();
+      if (!taskName) return;
+      this.isDecomposing = true;
+      try {
+        const body = {
+          taskName,
+          templateData: {
+            area: this.taskDetails?.area || '',
+            audience: this.taskDetails?.audience || '',
+            prompt: this.taskDetails?.prompt || ''
+          }
+        };
+        const resp = await this.safeFetch('/api/ai/decompose-subtasks', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_API_KEY || localStorage.getItem('API_KEY') || ''}`
+          },
+          body: JSON.stringify(body)
+        });
+        if (!resp.ok) throw new Error(`decompose-subtasks 接口失败: ${resp.status}`);
+        const data = await resp.json();
+        const subs = Array.isArray(data?.subTasks) ? data.subTasks : [];
+        if (subs.length === 0) throw new Error('AI 未返回子任务');
+        this.subTasksRaw = subs.map(s => ({ name: s.name, description: s.description, difficulty: s.difficulty || 'medium' }));
+        this.planTasks = this.mapSubTasksToPlan(this.subTasksRaw);
+        this.activePlanTaskId = this.planTasks[0]?.id || null;
+        // 持久化子任务
+        await this.saveSubTasksBatch(taskName);
+      } catch (e) {
+        console.error('拆解子任务失败:', e);
+        // 本地兜底：根据模板信息粗略生成 3 个子任务，避免流程卡死
+        try {
+          const base = String(this.taskDetails?.prompt || this.taskDetails?.area || taskName || '任务').trim();
+          const words = (String(this.taskDetails?.keywords || '').split(/[，,;；\s]/).filter(Boolean).slice(0,3));
+          const names = [
+            `${base} - 需求梳理`,
+            `${base} - 方案设计`,
+            `${base} - 风险评估`
+          ].slice(0, Math.max(1, Math.min(3, words.length || 3)));
+          this.subTasksRaw = names.map((n, i) => ({ name: n, description: words[i] ? `聚焦关键词：${words[i]}` : '—', difficulty: 'medium' }));
+          this.planTasks = this.mapSubTasksToPlan(this.subTasksRaw);
+          this.activePlanTaskId = this.planTasks[0]?.id || null;
+          await this.saveSubTasksBatch(taskName);
+        } catch (_) {}
+      } finally {
+        this.isDecomposing = false;
+      }
+    },
+    /**
+     * 子任务转换为页面展示的 planTasks（用于复用现有渲染区域）
+     */
+    mapSubTasksToPlan(list) {
+      const diffText = (d) => d === 'easy' ? '⭐ 简单' : (d === 'hard' ? '⭐⭐⭐ 困难' : '⭐⭐ 中等');
+      return (list || []).map((t, idx) => ({
+        id: idx + 1,
+        name: t.name,
+        content: `### ${t.name}\n\n**难度**：${diffText(t.difficulty)}\n\n**描述**：${t.description || '—'}`
+      }));
+    },
+    /**
+     * 保存子任务（幂等：先清空再写入）
+     */
+    async saveSubTasksBatch(taskName) {
+      const payload = (this.subTasksRaw || []).map(s => ({ name: s.name, description: s.description, difficulty: s.difficulty || 'medium' }));
+      if (!payload.length) return;
+      const resp = await this.safeFetch('/api/sub-tasks/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskName, subTasks: payload })
+      });
+      if (!resp.ok) throw new Error(`保存子任务失败: ${resp.status}`);
+    },
+    /**
+     * AI 分析所有子任务的问题并跳转
+     */
+    async analyzeAndContinue(taskName) {
+      try {
+        this.isAnalyzing = true;
+        const subList = (this.subTasksRaw || []).map(s => ({ name: s.name, description: s.description || '' }));
+        if (!subList.length) throw new Error('无子任务可分析');
+        // 调用 AI 分析
+        const resp = await this.safeFetch('/api/ai/analyze-task-problems', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_API_KEY || localStorage.getItem('API_KEY') || ''}`
+          },
+          body: JSON.stringify({ taskName, subTasks: subList })
+        });
+        if (!resp.ok) throw new Error(`分析问题失败: ${resp.status}`);
+        const data = await resp.json();
+        // 持久化问题清单
+        const resp2 = await this.safeFetch('/api/task-problems/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskName, problems: data?.problems || [] })
+        });
+        if (!resp2.ok) throw new Error(`保存问题清单失败: ${resp2.status}`);
+        // 跳转到集成分析页（向后兼容：携带 issues 兜底）
+        const issues = this.buildIssuesFromPlan();
+        const payload = (issues.length ? issues : ['已触发后端分析，稍等加载结果']).join('\n');
+        this.$router.push({ name: 'NewIntegration', query: { taskName, fromTaskManager: 'true', issues: payload } });
+      } finally {
+        this.isAnalyzing = false;
+      }
+    },
     // 选择子任务（来自 plan）
     selectPlanTask(task) {
       this.activePlanTaskId = task.id;
       this.selectedTask = task.name;
+      // 每次切换子任务默认回到“主演化”并尝试加载/生成
+      this.selectedFramework = 'trend';
+      this.ensureAllFrameworkContents();
     },
     addTask() {
       // 必须先选中一个父任务
@@ -1278,6 +1696,38 @@ export default {
   background-color: #f5f5f5;
   font-weight: bold;
 }
+
+/* 框架切换区域 */
+.framework-tabs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.framework-tabs .tab-btn {
+  padding: 6px 10px;
+  font-size: 0.92em;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.framework-tabs .tab-btn.active {
+  background: #eaf4ff;
+  border-color: #5a8cff;
+  color: #2d3a4b;
+  font-weight: 700;
+}
+.framework-tabs .gen-btn {
+  margin-left: auto;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  background: #28a745;
+  color: #fff;
+  cursor: pointer;
+}
+.framework-tabs .tab-spacer { flex: 1; }
 
 /* 任务板块样式 */
 .tasks {
