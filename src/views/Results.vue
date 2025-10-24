@@ -28,10 +28,15 @@
         <!-- 任务记录顶栏 -->
         <div class="task-record-bar">
           <span>任务记录：{{ currentTaskName }}</span>
+          <button class="refresh-btn" @click="refresh" :disabled="isLoading">{{ isLoading ? '加载中…' : '刷新' }}</button>
         </div>
 
         <!-- 文章预览 -->
         <div class="articles">
+          <div v-if="errorMessage" class="error-box">
+            <span>{{ errorMessage }}</span>
+          </div>
+          <div v-else-if="isLoading" class="loading-box">加载中，请稍候…</div>
           <!-- 已移除单一初步综合方案展示，直接显示两个在 NewIntegration 已生成的目标解决方案 -->
           <div class="article-row">
             <!-- 左侧文章 -->
@@ -101,7 +106,10 @@ export default {
       selectedIssues: '', // 用户选择的问题
       taskIndex: -1, // 在历史任务中的序号（从0开始）
   sidebarCollapsed: false,
-  integrationLoaded: false
+  integrationLoaded: false,
+  // 新增：加载与错误状态
+  isLoading: false,
+  errorMessage: ''
     };
   },
   computed: {
@@ -116,19 +124,55 @@ export default {
     this.selectedIssues = issuesParam;
     // 获取当前任务名称
     this.getCurrentTaskName();
-  // 仅后端加载（由 NewIntegration 生成并保存）
-    const loaded = await this.tryLoadFromBackend();
-    if (!loaded) {
-      console.warn('未找到已生成的两个解决方案，请返回重新生成。');
-    }
+    // 后端优先加载
+    await this.refresh();
     this.loading = [false,false];
   },
   methods: {
+    // 统一 fetch，Vite 代理失败时回退直连后端
+    async safeFetch(input, init) {
+      const res = await fetch(input, init);
+      const needFallback = res.status === 404 || ((res.headers.get('content-type') || '').includes('text/html'));
+      if (!needFallback) return res;
+      try {
+        const url = typeof input === 'string' ? input : input.url;
+        if (url?.startsWith('/api/')) {
+          const fallbackUrl = `http://localhost:3000${url}`;
+          return await fetch(fallbackUrl, init);
+        }
+      } catch (_) {}
+      return res;
+    },
+    async refresh() {
+      this.isLoading = true;
+      this.errorMessage = '';
+      try {
+        // 先按 analysisId 精确获取
+        let ok = false;
+        if (this.analysisId) {
+          ok = await this.tryLoadByAnalysisId(this.analysisId);
+        }
+        // 其次按 taskName 获取最近一条并匹配 analysisId
+        if (!ok) ok = await this.tryLoadByTaskName();
+        // 失败则回退本地缓存
+        if (!ok) ok = await this.loadFromLocalCache();
+        if (!ok) {
+          this.errorMessage = '未找到结果数据，请返回集成分析重新生成。';
+        } else {
+          // 成功后写入本地缓存
+          this.cacheResultsToLocal();
+        }
+      } catch (e) {
+        this.errorMessage = '加载失败：' + (e?.message || e);
+      } finally {
+        this.isLoading = false;
+      }
+    },
     // 后端复用：按 taskName 获取最近一条 Results（与 analysisId 匹配优先）
     async tryLoadFromBackend() {
       try {
         if (!this.currentTaskName) return false;
-        const res = await fetch(`/api/results-solutions/${encodeURIComponent(this.currentTaskName)}`);
+        const res = await this.safeFetch(`/api/results-solutions/${encodeURIComponent(this.currentTaskName)}`);
         if (!res.ok) return false;
         const data = await res.json();
         const list = data?.solutions || [];
@@ -148,6 +192,61 @@ export default {
         return !!(this.articles[0].content && this.articles[1].content);
       } catch (_) { return false; }
     },
+    // 新增：按 analysisId 直接获取单条记录
+    async tryLoadByAnalysisId(id) {
+      try {
+        const res = await this.safeFetch(`/api/results-solutions/id/${encodeURIComponent(id)}`);
+        if (!res.ok) return false;
+        const data = await res.json();
+        const rec = data?.solution;
+        if (!rec) return false;
+        // 同步 taskName（若未设置则以记录为准）
+        if (!this.currentTaskName && rec.task_name) this.currentTaskName = rec.task_name;
+        this.selectedIssues = rec.selected_issues || this.selectedIssues;
+        this.articles[0].title = rec.solution1_title || this.articles[0].title;
+        this.articles[0].content = rec.solution1_content || '';
+        this.articles[1].title = rec.solution2_title || this.articles[1].title;
+        this.articles[1].content = rec.solution2_content || '';
+        return !!(this.articles[0].content && this.articles[1].content);
+      } catch (_) { return false; }
+    },
+    // 新增：封装旧逻辑
+    async tryLoadByTaskName() {
+      return this.tryLoadFromBackend();
+    },
+    // 读取本地缓存（NewIntegration 写入的本地结果）
+    async loadFromLocalCache() {
+      try {
+        const key = `results:payload:${this.currentTaskName}`;
+        const raw = localStorage.getItem(key);
+        if (!raw) return false;
+        const obj = JSON.parse(raw);
+        if (!obj || !Array.isArray(obj.articles)) return false;
+        this.selectedIssues = obj.selectedIssues || this.selectedIssues;
+        // 将本地两篇文章灌入
+        if (obj.articles[0]) {
+          this.articles[0].title = obj.articles[0].title || this.articles[0].title;
+          this.articles[0].content = obj.articles[0].content || '';
+        }
+        if (obj.articles[1]) {
+          this.articles[1].title = obj.articles[1].title || this.articles[1].title;
+          this.articles[1].content = obj.articles[1].content || '';
+        }
+        return !!(this.articles[0].content && this.articles[1].content);
+      } catch (_) { return false; }
+    },
+    // 将当前结果写入本地缓存，便于断线/刷新保留
+    cacheResultsToLocal() {
+      try {
+        localStorage.setItem(`results:payload:${this.currentTaskName}` , JSON.stringify({
+          taskName: this.currentTaskName,
+          analysisId: this.analysisId,
+          selectedIssues: this.selectedIssues,
+          articles: this.articles,
+          when: Date.now()
+        }));
+      } catch(_) {}
+    },
   // 移除本地缓存逻辑
     toggleSidebar() {
       this.sidebarCollapsed = !this.sidebarCollapsed;
@@ -157,6 +256,17 @@ export default {
      */
     getCurrentTaskName() {
       try {
+        // 路由优先（NewIntegration 会传）
+        const routeTask = this.$route.query.taskName;
+        if (routeTask) {
+          this.currentTaskName = routeTask;
+          // 同时更新本地当前任务
+          try { localStorage.setItem('currentDialogTask', routeTask); } catch(_) {}
+          // 尝试定位序号
+          const dialogTasks = JSON.parse(localStorage.getItem('dialogTasks') || '[]');
+          this.taskIndex = dialogTasks.indexOf(routeTask);
+          return;
+        }
         const dialogTasks = JSON.parse(localStorage.getItem('dialogTasks') || '[]');
         const currentTask = localStorage.getItem('currentDialogTask');
         
@@ -182,7 +292,7 @@ export default {
      */
     async saveResultsToDatabase() {
       try {
-        const response = await fetch('/api/save-results', {
+        const response = await this.safeFetch('/api/save-results', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
