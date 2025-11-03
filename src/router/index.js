@@ -12,9 +12,6 @@ import TemplateSelection from '@/views/TemplateSelection.vue';
 import AnnotationReport from '@/views/AnnotationReport.vue';
 import Writing from '@/views/Writing.vue';
 import NextPage from '@/views/NextPage.vue';
-import IncreaseCapacity from '@/views/IncreaseCapacity.vue';
-import ImproveTrainingEfficiency from '@/views/ImproveTrainingEfficiency.vue';
-import LidarDebate from '@/views/LidarDebate.vue';
 import NewIntegration from '@/views/NewIntegration.vue';
 import FinalResult from '@/views/FinalResult.vue'; // 导入 FinalResult.vue
 import Flowchart from '@/views/Flowchart.vue'; // 导入流程图组件
