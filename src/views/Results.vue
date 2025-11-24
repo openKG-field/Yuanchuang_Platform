@@ -192,15 +192,32 @@ export default {
         return !!(this.articles[0].content && this.articles[1].content);
       } catch (_) { return false; }
     },
-    // 新增：按 analysisId 直接获取单条记录
+    // 新增：按 analysisId 获取记录
     async tryLoadByAnalysisId(id) {
       try {
+        // 优先通过 taskName 拉取列表并按 analysis_id 匹配，避免 /id/:id 404 的噪声
+        if (this.currentTaskName) {
+          const listRes = await this.safeFetch(`/api/results-solutions/${encodeURIComponent(this.currentTaskName)}`);
+          if (listRes.ok) {
+            const listData = await listRes.json();
+            const list = Array.isArray(listData?.solutions) ? listData.solutions : [];
+            const rec = list.find(r => String(r.analysis_id) === String(id));
+            if (rec) {
+              this.selectedIssues = rec.selected_issues || this.selectedIssues;
+              this.articles[0].title = rec.solution1_title || this.articles[0].title;
+              this.articles[0].content = rec.solution1_content || '';
+              this.articles[1].title = rec.solution2_title || this.articles[1].title;
+              this.articles[1].content = rec.solution2_content || '';
+              return !!(this.articles[0].content && this.articles[1].content);
+            }
+          }
+        }
+        // 回退：直查按ID（若后端实现的是主键ID获取）
         const res = await this.safeFetch(`/api/results-solutions/id/${encodeURIComponent(id)}`);
         if (!res.ok) return false;
         const data = await res.json();
         const rec = data?.solution;
         if (!rec) return false;
-        // 同步 taskName（若未设置则以记录为准）
         if (!this.currentTaskName && rec.task_name) this.currentTaskName = rec.task_name;
         this.selectedIssues = rec.selected_issues || this.selectedIssues;
         this.articles[0].title = rec.solution1_title || this.articles[0].title;
