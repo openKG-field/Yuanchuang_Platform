@@ -116,9 +116,258 @@ export default {
     }
   },
   methods: {
+    // 构建流程摘要：提取各阶段少量核心文本用于节点展示
+    buildFlowSummary(dialogData, templateData, taskPlanData, taskProblemsData, integrationData, resultsData, templateSelData, finalResultData) {
+      const getText = (v) => {
+        if (!v) return '';
+        if (typeof v === 'string') return v;
+        return JSON.stringify(v);
+      };
+      const trim = (s, n=120) => (s || '').replace(/\s+/g, ' ').slice(0, n);
+      const mdStrip = (s) => (s || '').replace(/[#>*`_\-\[\]()]/g, '');
+
+      // 对话：拿最后一条用户与AI各一句
+      let dialogText = '';
+      try {
+        const list = Array.isArray(dialogData?.messages) ? dialogData.messages : (Array.isArray(dialogData) ? dialogData : []);
+        const lastUser = [...list].reverse().find(m => (m.sender||'') !== 'AI' && (m.user_question||m.text));
+        const lastAI = [...list].reverse().find(m => (m.sender||'') === 'AI' && (m.ai_response||m.text));
+        const u = lastUser ? (lastUser.user_question || lastUser.text || lastUser.content || '') : '';
+        const a = lastAI ? (lastAI.ai_response || lastAI.text || lastAI.content || '') : '';
+        dialogText = `你: ${trim(u, 80)}\nAI: ${trim(a, 80)}`;
+      } catch(_) {}
+
+      // Template：取最新一条 prompt 的前几句
+      let templateText = '';
+      try {
+        const contentsArr = Array.isArray(templateData?.aiContents) ? templateData.aiContents
+          : (Array.isArray(templateData?.contents) ? templateData.contents
+          : (Array.isArray(templateData) ? templateData : []));
+        const latest = contentsArr.length ? contentsArr[contentsArr.length - 1] : null;
+        const fields = [latest?.area, latest?.audience, latest?.keywords, latest?.tone].filter(Boolean).join(' | ');
+        const prompt = mdStrip(getText(latest?.prompt));
+        templateText = [fields, trim(prompt, 150)].filter(Boolean).join('\n');
+      } catch(_) {}
+
+      // Task Manager：子任务名称（最多3个）+ 框架覆盖情况
+      let tmText = '';
+      try {
+        const tasks = Array.isArray(taskPlanData?.tasks) ? taskPlanData.tasks : [];
+        const names = (tasks || []).map(t => t?.name || t?.title).filter(Boolean).slice(0,3).join('、');
+        tmText = names ? `子任务: ${names}${tasks.length>3? ' 等':''}` : '子任务：无';
+        // 子问题统计
+        const grouped = taskProblemsData?.problems || {};
+        const totalProblems = Object.values(grouped).reduce((acc, arr) => acc + (Array.isArray(arr)? arr.length: 0), 0);
+        const selectedCnt = Object.values(grouped).reduce((acc, arr) => acc + (Array.isArray(arr)? arr.filter(p=>p.isSelected).length: 0), 0);
+        tmText += `\n子问题: ${totalProblems} 项，已选 ${selectedCnt}`;
+      } catch(_) {}
+
+      // NewIntegration：选中问题摘要
+      let niText = '';
+      try {
+        const recordsArr = Array.isArray(integrationData?.analysisRecords) ? integrationData.analysisRecords
+          : (Array.isArray(integrationData) ? integrationData : []);
+        const rec = recordsArr[0];
+        const sel = mdStrip(rec?.selected_issues || '');
+        niText = trim(sel, 160) || '（未选择问题）';
+      } catch(_) {}
+
+      // Results：两方案标题
+      let resultsText = '';
+      try {
+        const list = Array.isArray(resultsData?.solutions) ? resultsData.solutions
+          : (Array.isArray(resultsData) ? resultsData : []);
+        const r = list[0];
+        const t1 = r?.solution1_title || '方案一';
+        const t2 = r?.solution2_title || '方案二';
+        resultsText = `${t1}\n${t2}`;
+      } catch(_) {}
+
+      // Template-Selection：方法名
+      let tsText = '';
+      try {
+        const rec = templateSelData?.record || (Array.isArray(templateSelData?.records)? templateSelData.records[0]: null);
+        const l = rec?.left_method ? mdStrip(rec.left_method).split(/\n|\r/)[0] : '';
+        const r = rec?.right_method ? mdStrip(rec.right_method).split(/\n|\r/)[0] : '';
+        tsText = [l, r].filter(Boolean).join(' vs ');
+        if (!tsText) tsText = '（无方法对比）';
+      } catch(_) {}
+
+      // Final-Result：标题/首行
+      let frText = '';
+      try {
+        const rec = finalResultData?.record || (Array.isArray(finalResultData)? finalResultData[finalResultData.length-1]: finalResultData);
+        const content = mdStrip(rec?.method_content || rec?.combined_plan || this.finalResultContent || this.combinedPlanContent || '');
+        frText = trim(content, 180) || '（无最终整合）';
+      } catch(_) {}
+
+      return {
+        nodes: [
+          { id:'dialog', title:'对话', text: dialogText },
+          { id:'template', title:'Template 思考', text: templateText },
+          { id:'tm', title:'Task Manager', text: tmText },
+          { id:'ni', title:'NewIntegration', text: niText },
+          { id:'results', title:'Results', text: resultsText },
+          { id:'ts', title:'Template-Selection', text: tsText },
+          { id:'final', title:'Final-Result', text: frText }
+        ],
+        edges: [
+          ['dialog','template'],
+          ['template','tm'],
+          ['tm','ni'],
+          ['ni','results'],
+          ['results','ts'],
+          ['ts','final']
+        ]
+      };
+    },
+
+    // 在 Canvas 上绘制流程图，返回 canvas
+    drawFlowDiagramCanvas(summary) {
+      const px = (n)=> n; // 简化：直接使用像素
+      const nodeW = px(360), nodeH = px(170);
+      const gapX = px(60), gapY = px(80);
+      const margin = { l: px(40), t: px(30), r: px(40), b: px(30) };
+      // 三列布局，三行（最后一行只有 Final-Result 居中）
+      const cols = 3;
+      const rows = 3;
+      const canvasW = margin.l + cols*nodeW + (cols-1)*gapX + margin.r;
+      const canvasH = margin.t + rows*nodeH + (rows-1)*gapY + margin.b;
+      const canvas = document.createElement('canvas');
+      canvas.width = canvasW; canvas.height = canvasH;
+      const ctx = canvas.getContext('2d');
+      // 背景
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0,0,canvasW,canvasH);
+      ctx.font = '14px Segoe UI, Arial, \u5FAE\u8F6F\u96C5\u9ED1';
+      ctx.textBaseline = 'top';
+
+      // 节点坐标
+      const pos = new Map();
+      // Row1
+      pos.set('dialog', {x: margin.l + 0*(nodeW+gapX), y: margin.t + 0*(nodeH+gapY)});
+      pos.set('template', {x: margin.l + 1*(nodeW+gapX), y: margin.t + 0*(nodeH+gapY)});
+      pos.set('tm', {x: margin.l + 2*(nodeW+gapX), y: margin.t + 0*(nodeH+gapY)});
+      // Row2
+      pos.set('ni', {x: margin.l + 0*(nodeW+gapX), y: margin.t + 1*(nodeH+gapY)});
+      pos.set('results', {x: margin.l + 1*(nodeW+gapX), y: margin.t + 1*(nodeH+gapY)});
+      pos.set('ts', {x: margin.l + 2*(nodeW+gapX), y: margin.t + 1*(nodeH+gapY)});
+      // Row3（居中）
+      const centerX = margin.l + 1*(nodeW+gapX);
+      pos.set('final', {x: centerX, y: margin.t + 2*(nodeH+gapY)});
+
+      // 绘制箭头
+      const drawArrow = (x1,y1,x2,y2) => {
+        const headLen = 10;
+        const dx = x2 - x1, dy = y2 - y1;
+        const angle = Math.atan2(dy, dx);
+        ctx.strokeStyle = '#999';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - headLen*Math.cos(angle - Math.PI/6), y2 - headLen*Math.sin(angle - Math.PI/6));
+        ctx.lineTo(x2 - headLen*Math.cos(angle + Math.PI/6), y2 - headLen*Math.sin(angle + Math.PI/6));
+        ctx.lineTo(x2, y2);
+        ctx.fillStyle = '#999';
+        ctx.fill();
+      };
+
+      // 先画边
+      summary.edges.forEach(([a,b]) => {
+        const pa = pos.get(a), pb = pos.get(b);
+        if (!pa || !pb) return;
+        const ax = pa.x + nodeW, ay = pa.y + nodeH/2;
+        const bx = pb.x, by = pb.y + nodeH/2;
+        drawArrow(ax, ay, bx, by);
+      });
+
+      // 绘制圆角框
+      const roundRect = (x,y,w,h,r) => {
+        const rr = Math.min(r, w/2, h/2);
+        ctx.beginPath();
+        ctx.moveTo(x+rr,y);
+        ctx.arcTo(x+w,y,x+w,y+h,rr);
+        ctx.arcTo(x+w,y+h,x,y+h,rr);
+        ctx.arcTo(x,y+h,x,y,rr);
+        ctx.arcTo(x,y,x+w,y,rr);
+        ctx.closePath();
+      };
+
+      const wrapText = (text, maxWidth) => {
+        const words = (text||'').split(/\s+/);
+        const lines = [];
+        let line = '';
+        for (let i=0;i<words.length;i++) {
+          const test = line ? (line + ' ' + words[i]) : words[i];
+          if (ctx.measureText(test).width <= maxWidth) {
+            line = test;
+          } else {
+            if (line) lines.push(line);
+            // 如果单词太长，粗暴截断
+            if (ctx.measureText(words[i]).width > maxWidth) {
+              let w = words[i];
+              while (ctx.measureText(w).width > maxWidth && w.length>1) {
+                w = w.slice(0, -1);
+              }
+              lines.push(w);
+              line = '';
+            } else {
+              line = words[i];
+            }
+          }
+        }
+        if (line) lines.push(line);
+        return lines.slice(0, 6); // 限制最多6行
+      };
+
+      const drawNode = (node) => {
+        const p = pos.get(node.id);
+        if (!p) return;
+        // 背景
+        ctx.fillStyle = '#f7faff';
+        ctx.strokeStyle = '#7aaef7';
+        ctx.lineWidth = 2;
+        roundRect(p.x, p.y, nodeW, nodeH, 12);
+        ctx.fill();
+        ctx.stroke();
+        // 标题条
+        ctx.fillStyle = '#2f74ff';
+        roundRect(p.x, p.y, nodeW, 32, 12);
+        ctx.fill();
+        // 标题文字
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 14px Segoe UI, Arial, \u5FAE\u8F6F\u96C5\u9ED1';
+        ctx.fillText(node.title, p.x + 12, p.y + 8);
+        // 正文
+        ctx.fillStyle = '#333333';
+        ctx.font = '12px Segoe UI, Arial, \u5FAE\u8F6F\u96C5\u9ED1';
+        const padding = 12;
+        const lines = wrapText((node.text||'').replace(/\n/g,' '), nodeW - padding*2);
+        let ty = p.y + 40;
+        for (const ln of lines) {
+          ctx.fillText(ln, p.x + padding, ty);
+          ty += 16;
+        }
+      };
+
+      summary.nodes.forEach(drawNode);
+      return canvas;
+    },
     initCharts() {
       if (this.showRadarChart) {
-        const chart2D = echarts.init(document.getElementById('2d-chart'));
+        const el = document.getElementById('2d-chart');
+        if (!el) return;
+        // 避免重复初始化同一 DOM，复用或清理
+        let chart2D = echarts.getInstanceByDom(el);
+        if (!chart2D) {
+          chart2D = echarts.init(el);
+        } else {
+          chart2D.clear();
+        }
         const option2D = {
           title: {
             text: '雷达图示例'
@@ -667,6 +916,24 @@ export default {
           });
           await addCanvasMultiPage(canv, sec.title);
           document.body.removeChild(div);
+        }
+
+        // 额外：流程概览图（含节点内容）
+        try {
+          const summary = this.buildFlowSummary(dialogData, templateData, taskPlanData, taskProblemsData, integrationData, resultsData, templateSelData, finalResultData);
+          const flowCanvas = this.drawFlowDiagramCanvas(summary);
+          pdf.addPage();
+          const startPage = pdf.getNumberOfPages();
+          const headerImg = await renderHeaderImage('流程概览图（含节点内容）');
+          const headerY = margin.top - 6;
+          pdf.addImage(headerImg.dataUrl, 'JPEG', margin.left, headerY, contentWidth, headerImg.height);
+          const topAfterHeader = headerY + headerImg.height + 2;
+          const ratioF = flowCanvas.height / flowCanvas.width;
+          const imgH = contentWidth * ratioF;
+          pdf.addImage(flowCanvas.toDataURL('image/jpeg', 0.85), 'JPEG', margin.left, topAfterHeader, contentWidth, imgH);
+          tocEntries.push({ title: '流程概览图（含节点内容）', page: startPage });
+        } catch (e) {
+          console.warn('流程图渲染失败，跳过：', e);
         }
 
         // 8. 可视化雷达图 (保持最后) & AI 评分
