@@ -158,6 +158,7 @@ export default {
     { key: 'fop', label: '主作用（FOP分析）' }
   ],
   frameworkLoading: false,
+  batchFrameworkEnsured: false,
   contentCache: {}, // { [subTaskId]: { trend: md, system: md, fop: md } }
   // 编辑态
   isEditingPlan: false,
@@ -258,6 +259,12 @@ export default {
     }
   },
   methods: {
+    // 判断当前 planTasks 是否为 Template.vue 生成的“三大框架”占位（id 为 trend/system/fop）
+    isFrameworkPlanList(list) {
+      const l = Array.isArray(list) ? list : [];
+      if (l.length !== 3) return false;
+      return l.every(t => ['trend', 'system', 'fop'].includes(String(t.id)));
+    },
     // 父任务是否展开
     isParentExpanded(taskName) {
       return !!this.expandedParents[taskName];
@@ -484,6 +491,11 @@ export default {
             if (this.selectedParentTask) {
               this.subTasksMap[this.selectedParentTask] = this.planTasks.map(t => t.name);
             }
+            // 背景批量生成三框架，确保“主系统/主作用”也会入库（仅对真实子任务触发，避免把 Template 三大框架当成子任务生成）
+            if (!this.batchFrameworkEnsured && !this.isFrameworkPlanList(this.planTasks)) {
+              this.batchFrameworkEnsured = true;
+              setTimeout(() => { this.generateFrameworksForAllSubTasks().catch(()=>{}); }, 0);
+            }
             return;
           }
         }
@@ -508,6 +520,11 @@ export default {
         // 将 plan 子任务挂接到当前父任务下以便左侧渲染（不影响原有recentTasks显示逻辑）
         if (this.selectedParentTask) {
           this.subTasksMap[this.selectedParentTask] = this.planTasks.map(t => t.name);
+        }
+        // 背景批量生成三框架，确保“主系统/主作用”也会入库（仅对真实子任务触发）
+        if (!this.batchFrameworkEnsured && !this.isFrameworkPlanList(this.planTasks)) {
+          this.batchFrameworkEnsured = true;
+          setTimeout(() => { this.generateFrameworksForAllSubTasks().catch(()=>{}); }, 0);
         }
         // 若仅有本地会话数据，尝试查询后端以获取该任务的记录ID，便于后续 update
         const taskName = this.getCurrentTaskName();
@@ -639,6 +656,29 @@ export default {
         };
         return;
       }
+      // 新增兜底：如果 Template.vue 在 sessionStorage 中已生成“三大框架”，则按所选框架优先使用其内容作为初始值
+      try {
+        const raw = sessionStorage.getItem('taskPlan');
+        if (raw) {
+          const plan = JSON.parse(raw);
+          const arr = Array.isArray(plan?.tasks) ? plan.tasks : [];
+          const seed = arr.find(x => String(x.id) === String(this.selectedFramework));
+          const seedContent = typeof seed?.content === 'string' ? seed.content : '';
+          if (seedContent) {
+            this.contentCache[this.activePlanTaskId] = {
+              ...(this.contentCache[this.activePlanTaskId] || {}),
+              [this.selectedFramework]: seedContent
+            };
+            this.editablePlanContent = seedContent;
+            // 同步保存为一个版本（标注来源）
+            const note = this.selectedFramework === 'trend' ? '主演化(趋势分析)-Template初始'
+                      : this.selectedFramework === 'system' ? '主系统(九宫格+因果)-Template初始'
+                      : '主作用(FOP分析)-Template初始';
+            await this.saveCurrentPlanContent(note);
+            return;
+          }
+        }
+      } catch (_) {}
       // 自动生成
       await this.generateFrameworkContent(this.selectedFramework, true);
     },
@@ -747,8 +787,17 @@ export default {
           const list = Array.isArray(data?.subTasks) ? data.subTasks : [];
           if (list.length > 0) {
             this.subTasksRaw = list.map((r) => ({ name: r.sub_task_name, description: r.description, difficulty: r.difficulty || 'medium' }));
-            this.planTasks = this.mapSubTasksToPlan(this.subTasksRaw);
-            this.activePlanTaskId = this.planTasks[0]?.id || null;
+            // 若当前 planTasks 是 Template 三大框架占位，则仅保留 subTasksRaw，不覆盖 planTasks 的展示；
+            // 否则使用真实子任务替换 planTasks。
+            if (!this.isFrameworkPlanList(this.planTasks)) {
+              this.planTasks = this.mapSubTasksToPlan(this.subTasksRaw);
+              this.activePlanTaskId = this.planTasks[0]?.id || null;
+            }
+            // 背景批量生成三框架（仅对真实子任务触发）
+            if (!this.batchFrameworkEnsured && !this.isFrameworkPlanList(this.planTasks)) {
+              this.batchFrameworkEnsured = true;
+              setTimeout(() => { this.generateFrameworksForAllSubTasks().catch(()=>{}); }, 0);
+            }
             return;
           }
         }
@@ -785,8 +834,10 @@ export default {
         const subs = Array.isArray(data?.subTasks) ? data.subTasks : [];
         if (subs.length === 0) throw new Error('AI 未返回子任务');
         this.subTasksRaw = subs.map(s => ({ name: s.name, description: s.description, difficulty: s.difficulty || 'medium' }));
-        this.planTasks = this.mapSubTasksToPlan(this.subTasksRaw);
-        this.activePlanTaskId = this.planTasks[0]?.id || null;
+        if (!this.isFrameworkPlanList(this.planTasks)) {
+          this.planTasks = this.mapSubTasksToPlan(this.subTasksRaw);
+          this.activePlanTaskId = this.planTasks[0]?.id || null;
+        }
         // 持久化子任务
         await this.saveSubTasksBatch(taskName);
       } catch (e) {
@@ -801,8 +852,10 @@ export default {
             `${base} - 风险评估`
           ].slice(0, Math.max(1, Math.min(3, words.length || 3)));
           this.subTasksRaw = names.map((n, i) => ({ name: n, description: words[i] ? `聚焦关键词：${words[i]}` : '—', difficulty: 'medium' }));
-          this.planTasks = this.mapSubTasksToPlan(this.subTasksRaw);
-          this.activePlanTaskId = this.planTasks[0]?.id || null;
+          if (!this.isFrameworkPlanList(this.planTasks)) {
+            this.planTasks = this.mapSubTasksToPlan(this.subTasksRaw);
+            this.activePlanTaskId = this.planTasks[0]?.id || null;
+          }
           await this.saveSubTasksBatch(taskName);
         } catch (_) {}
       } finally {
