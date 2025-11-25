@@ -893,6 +893,26 @@ export default {
           if (!finalResultHTML) finalResultHTML = '<p>无最终整合数据</p>';
         } catch(_) { finalResultHTML='<p>获取最终整合失败</p>'; }
 
+        // 8. 可执行实施方案 (ExecutablePlan) 本地保存：report:executablePlan
+        let executablePlanHTML = '';
+        try {
+          const rawExec = localStorage.getItem('report:executablePlan');
+          if (rawExec) {
+            const execObj = JSON.parse(rawExec);
+            const planMd = execObj?.planText || '';
+            const codeOnlyMd = execObj?.codeOnlyText || '';
+            const codeBlocks = Array.isArray(execObj?.codeBlocks) ? execObj.codeBlocks : [];
+            if (planMd) executablePlanHTML += `<h4 style=\"margin:12px 0 4px;\">可执行实施方案</h4><div>${marked.parse(planMd)}</div>`;
+            if (codeOnlyMd) executablePlanHTML += `<h4 style=\"margin:12px 0 4px;\">代码要点汇总</h4><div>${marked.parse(codeOnlyMd)}</div>`;
+            if (codeBlocks.length) {
+              executablePlanHTML += `<h4 style=\"margin:12px 0 4px;\">生成代码片段</h4>` + codeBlocks.map(b => `<div style=\"margin:6px 0 12px;\"><div style=\"font-size:12px;color:#555;\">语言: ${esc(b.language || '未知')}</div><pre style=\"background:#f5f5f5;padding:10px;border-radius:4px;white-space:pre-wrap;font-size:12px;\"><code>${esc(b.code || '')}</code></pre></div>`).join('');
+            }
+            if (!executablePlanHTML) executablePlanHTML = '<p>无执行方案数据</p>';
+          } else {
+            executablePlanHTML = '<p>无执行方案数据</p>';
+          }
+        } catch(_) { executablePlanHTML = '<p>获取执行方案失败</p>'; }
+
         // ============= 按指定顺序添加各部分 (目录页之后) =============
         const sectionList = [
           { title:'对话记录', html: dialogHTML },
@@ -901,7 +921,8 @@ export default {
           { title:'问题分析与选择 (NewIntegration)', html: integrationHTML },
           { title:'两个解决方案 (Results)', html: resultsHTML },
           { title:'方案创新方法对比 (Template-Selection)', html: tplSelHTML },
-          { title:'最终整合结果 (Final-Result)', html: finalResultHTML }
+          { title:'最终整合结果 (Final-Result)', html: finalResultHTML },
+          { title:'可执行实施方案与代码 (Executable Plan)', html: executablePlanHTML }
         ];
 
         for (const sec of sectionList) {

@@ -43,7 +43,7 @@
       <div class="next-button">
         <div class="actions-row">
           <button class="secondary" @click="regeneratePlan" :disabled="streaming || isGenerating">重新思考</button>
-          <button @click="sendResultToAI" :disabled="isGenerating || streaming">下一步</button>
+          <button @click="sendResultToAI" :disabled="isGenerating || streaming">生成实施方案</button>
         </div>
       </div>
     </main>
@@ -348,7 +348,8 @@ export default {
         this.stopGenerating();
       }
       // 无论成功失败都前往 Visualization（失败时也带提示文本方便排查）
-      this.$router.push({ name: 'Visualization', query: { aiScores: aiResponse } });
+      // 跳转至新页面 ExecutablePlan，中间再进入 Visualization
+      this.$router.push({ name: 'ExecutablePlan', query: { aiScores: aiResponse } });
     }
   }
 };
