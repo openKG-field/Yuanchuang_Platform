@@ -14,6 +14,7 @@ import Writing from '@/views/Writing.vue';
 import NextPage from '@/views/NextPage.vue';
 import NewIntegration from '@/views/NewIntegration.vue';
 import FinalResult from '@/views/FinalResult.vue'; // 导入 FinalResult.vue
+import ExecutablePlan from '@/views/ExecutablePlan.vue'; // 新增：可执行技术方案页面
 import Flowchart from '@/views/Flowchart.vue'; // 导入流程图组件
 import { Breadcrumb } from "ant-design-vue";
 import ElementPlus from 'element-plus';
@@ -31,6 +32,12 @@ const routes = [
     name: 'Dialog',
     component: Dialog,
     meta: { breadcrumb: '对话入口', parent: '首页' }
+  },
+  {
+    path: '/executable-plan',
+    name: 'ExecutablePlan',
+    component: ExecutablePlan,
+    meta: { breadcrumb: '实施方案', parent: '首页' }
   },
   {
     path: '/flowchart',
