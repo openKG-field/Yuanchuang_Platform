@@ -367,6 +367,30 @@ function setupDatabaseConnection() {
       }
     });
 
+    // 新增：可执行实施方案存储表
+    const createExecutablePlansTable = `
+      CREATE TABLE IF NOT EXISTS executable_plans (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        task_name VARCHAR(100) NOT NULL,
+        plan_text LONGTEXT,
+        code_only_text LONGTEXT,
+        code_blocks JSON,
+        language VARCHAR(50),
+        env VARCHAR(50),
+        user_id INT DEFAULT NULL,
+        saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_exec_task (task_name)
+      )
+    `;
+    db.execute(createExecutablePlansTable, (err) => {
+      if (err) {
+        console.error('创建 executable_plans 表失败:', err);
+      } else {
+        console.log('executable_plans 表创建成功或已存在');
+      }
+    });
+
     // 新增：子任务表（存放 TaskManager 拆解的 1-5 个子任务）
     const createSubTasksTable = `
       CREATE TABLE IF NOT EXISTS sub_tasks (
@@ -2387,6 +2411,59 @@ function setupDatabaseConnection() {
     } catch (error) {
       console.error('删除Visualization评估数据失败:', error);
       res.status(500).json({ message: '服务器错误', error: error.message });
+    }
+  });
+
+  // ===== Executable Plan 持久化接口 =====
+  // 保存可执行实施方案 (插入新记录)
+  app.post('/api/executable-plan/save', async (req, res) => {
+    try {
+      const { taskName, planText, codeOnlyText, codeBlocks, language, env, userId } = req.body || {};
+      if (!taskName || (!planText && !codeOnlyText)) {
+        return res.status(400).json({ success: false, message: 'taskName 与 planText 或 codeOnlyText 不能为空' });
+      }
+      const [result] = await db.promise().execute(
+        `INSERT INTO executable_plans (task_name, plan_text, code_only_text, code_blocks, language, env, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [taskName, planText || null, codeOnlyText || null, JSON.stringify(codeBlocks || []), language || null, env || null, userId || null]
+      );
+      res.status(201).json({ success: true, id: result.insertId, message: '保存可执行实施方案成功' });
+    } catch (error) {
+      console.error('保存可执行实施方案失败:', error);
+      res.status(500).json({ success: false, message: '服务器错误', error: error.message });
+    }
+  });
+
+  // 获取指定任务名的最新可执行实施方案
+  app.get('/api/executable-plan/:taskName', async (req, res) => {
+    try {
+      const { taskName } = req.params;
+      const [rows] = await db.promise().execute(
+        `SELECT * FROM executable_plans WHERE task_name = ? ORDER BY saved_at DESC LIMIT 1`,
+        [decodeURIComponent(taskName)]
+      );
+      if (!rows || rows.length === 0) return res.json({ success: true, record: null });
+      const rec = rows[0];
+      // 解析 JSON 字段
+      try { rec.code_blocks = JSON.parse(rec.code_blocks || '[]'); } catch(_) { rec.code_blocks = []; }
+      res.json({ success: true, record: rec });
+    } catch (error) {
+      console.error('获取可执行实施方案失败:', error);
+      res.status(500).json({ success: false, message: '服务器错误', error: error.message });
+    }
+  });
+
+  // 根据 ID 获取可执行实施方案
+  app.get('/api/executable-plan/id/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const [rows] = await db.promise().execute('SELECT * FROM executable_plans WHERE id = ?', [id]);
+      if (!rows || rows.length === 0) return res.status(404).json({ success: false, message: '未找到记录' });
+      const rec = rows[0];
+      try { rec.code_blocks = JSON.parse(rec.code_blocks || '[]'); } catch(_) { rec.code_blocks = []; }
+      res.json({ success: true, record: rec });
+    } catch (error) {
+      console.error('根据ID获取可执行实施方案失败:', error);
+      res.status(500).json({ success: false, message: '服务器错误', error: error.message });
     }
   });
 }
