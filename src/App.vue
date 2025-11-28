@@ -56,6 +56,11 @@
               icon="Finished"
             />
             <el-step 
+              title="可执行方案" 
+              description="实施与代码"
+              icon="EditPen"
+            />
+            <el-step 
               title="可视化评估" 
               description="效果评估"
               icon="PieChart"
@@ -89,7 +94,8 @@ export default defineComponent({
         '/results',          // 4: 结果对比
         '/template-selection', // 5: 模板选择
         '/final-result',     // 6: 最终整合
-        '/visualization'     // 7: 可视化评估
+        '/executable-plan',  // 7: 可执行方案（新增）
+        '/visualization'     // 8: 可视化评估
       ]
     };
   },
