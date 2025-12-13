@@ -401,17 +401,49 @@ export default {
     /**
      * 加载Dialog.vue的任务数据
      */
-    loadDialogTasks() {
+    async loadDialogTasks() {
       try {
-        // 从localStorage获取Dialog.vue保存的任务数据
+        // 优先从后端获取任务列表
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        if (user.id) {
+          const res = await fetch(`/api/dialog-tasks/${user.id}`, {
+             headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && Array.isArray(data.tasks)) {
+              // 后端返回的任务对象数组，提取 task_name
+              // 假设后端按时间倒序或正序返回。通常我们希望显示最近的。
+              // 如果后端是 SELECT * ... ORDER BY created_at DESC，那么 data.tasks[0] 是最新的。
+              // recentTasks 需要显示最近的5个。
+              const tasks = data.tasks.map(t => t.task_name);
+              this.totalTaskCount = tasks.length;
+              // 如果后端已经是倒序（最新在前），则取前5个
+              // 如果后端是正序（最旧在前），则取后5个并反转
+              // 暂且假设后端返回的是所有任务，我们取最后5个并反转（模拟 localStorage 的行为，通常 localStorage push 是正序）
+              // 为了保险，如果后端有 created_at 可以排序。这里简化处理。
+              this.recentTasks = tasks.slice(-5).reverse(); 
+              return;
+            }
+          }
+        }
+
+        // 回退：从localStorage获取Dialog.vue保存的任务数据
         const dialogTasks = JSON.parse(localStorage.getItem('dialogTasks') || '[]');
         this.totalTaskCount = dialogTasks.length;
         // 只显示最近的5个任务
         this.recentTasks = dialogTasks.slice(-5).reverse();
       } catch (error) {
         console.error('加载任务数据失败:', error);
-        this.totalTaskCount = 0;
-        this.recentTasks = [];
+        // 出错时尝试读取本地
+        try {
+            const dialogTasks = JSON.parse(localStorage.getItem('dialogTasks') || '[]');
+            this.totalTaskCount = dialogTasks.length;
+            this.recentTasks = dialogTasks.slice(-5).reverse();
+        } catch(_) {
+            this.totalTaskCount = 0;
+            this.recentTasks = [];
+        }
       }
     },
     /**
@@ -557,7 +589,27 @@ export default {
     renderMarkdown(markdown) {
       return marked(markdown);
     },
-    loadFinalResultFromLocal() {
+    async loadFinalResultFromLocal() {
+      // 尝试从后端获取
+      const taskName = this.selectedTask || this.getCurrentTaskNameFallback();
+      if (taskName) {
+        try {
+          const res = await fetch(`/api/final-result-expanded/${encodeURIComponent(taskName)}`);
+          if (res.ok) {
+            const data = await res.json();
+            const rec = data?.record || (Array.isArray(data) ? data[data.length-1] : null);
+            if (rec) {
+              // 优先使用 method_content 作为 finalResultContent
+              this.finalResultContent = rec.method_content || '';
+              // 如果有 combined_plan 也可以顺便设置
+              if (rec.combined_plan) this.combinedPlanContent = rec.combined_plan;
+              return;
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 回退到本地缓存
       try {
         const raw = localStorage.getItem('report:finalResult');
         if (!raw) return;
@@ -716,8 +768,9 @@ export default {
         const resultsPromise = taskName ? safeFetchJson(`/api/results-solutions/${encode(taskName)}`) : Promise.resolve(null);
         const templateSelectionPromise = taskName ? safeFetchJson(`/api/template-selection/${encode(taskName)}`) : Promise.resolve(null);
         const finalResultPromise = taskName ? safeFetchJson(`/api/final-result-expanded/${encode(taskName)}`) : Promise.resolve(null);
-        const [dialogData, templateData, taskManagerData, taskPlanData, taskProblemsData, integrationData, resultsData, templateSelData, finalResultData] = await Promise.all([
-          dialogPromise, templatePromise, taskManagerPromise, taskPlanPromise, taskProblemsPromise, newIntegrationPromise, resultsPromise, templateSelectionPromise, finalResultPromise
+        const executablePlanPromise = taskName ? safeFetchJson(`/api/executable-plan/${encode(taskName)}`) : Promise.resolve(null);
+        const [dialogData, templateData, taskManagerData, taskPlanData, taskProblemsData, integrationData, resultsData, templateSelData, finalResultData, executablePlanData] = await Promise.all([
+          dialogPromise, templatePromise, taskManagerPromise, taskPlanPromise, taskProblemsPromise, newIntegrationPromise, resultsPromise, templateSelectionPromise, finalResultPromise, executablePlanPromise
         ]);
 
         // ============= 构建每个部分的 HTML (不包含标题，标题用 headerImage) =============
@@ -893,15 +946,32 @@ export default {
           if (!finalResultHTML) finalResultHTML = '<p>无最终整合数据</p>';
         } catch(_) { finalResultHTML='<p>获取最终整合失败</p>'; }
 
-        // 8. 可执行实施方案 (ExecutablePlan) 本地保存：report:executablePlan
+        // 8. 可执行实施方案 (ExecutablePlan) 优先后端，回退本地
         let executablePlanHTML = '';
         try {
-          const rawExec = localStorage.getItem('report:executablePlan');
-          if (rawExec) {
-            const execObj = JSON.parse(rawExec);
-            const planMd = execObj?.planText || '';
-            const codeOnlyMd = execObj?.codeOnlyText || '';
-            const codeBlocks = Array.isArray(execObj?.codeBlocks) ? execObj.codeBlocks : [];
+          let execObj = null;
+          // 尝试从后端数据取
+          if (executablePlanData && executablePlanData.plan) {
+             execObj = executablePlanData.plan;
+          }
+          
+          // 如果后端没拿到，尝试本地
+          if (!execObj) {
+            const rawExec = localStorage.getItem('report:executablePlan');
+            if (rawExec) execObj = JSON.parse(rawExec);
+          }
+
+          if (execObj) {
+            const planMd = execObj.planText || execObj.plan_text || '';
+            const codeOnlyMd = execObj.codeOnlyText || execObj.code_only_text || '';
+            // codeBlocks 可能在后端是 JSON 字符串或对象，需注意解析
+            let codeBlocks = [];
+            if (Array.isArray(execObj.codeBlocks)) codeBlocks = execObj.codeBlocks;
+            else if (Array.isArray(execObj.code_blocks)) codeBlocks = execObj.code_blocks;
+            else if (typeof execObj.code_blocks === 'string') {
+                try { codeBlocks = JSON.parse(execObj.code_blocks); } catch(_) {}
+            }
+
             if (planMd) executablePlanHTML += `<h4 style=\"margin:12px 0 4px;\">可执行实施方案</h4><div>${marked.parse(planMd)}</div>`;
             if (codeOnlyMd) executablePlanHTML += `<h4 style=\"margin:12px 0 4px;\">代码要点汇总</h4><div>${marked.parse(codeOnlyMd)}</div>`;
             if (codeBlocks.length) {

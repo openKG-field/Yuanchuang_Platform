@@ -247,7 +247,7 @@ export default {
     copyCode(code) {
       try { navigator.clipboard.writeText(code); } catch(_) {}
     },
-    saveLocally() {
+    async saveLocally() {
       try {
         // 统一与 Visualization.vue 读取格式: planText, codeOnlyText, codeBlocks[{language, code}]
         const codeBlocks = this.extractedCodeBlocks.map(b => ({ language: b.lang || 'text', code: b.code }));
@@ -263,8 +263,37 @@ export default {
           env: this.runtimeEnv,
           savedAt: new Date().toISOString()
         };
+        
+        // 1. 保存到本地缓存 (作为备份/快速读取)
         localStorage.setItem('report:executablePlan', JSON.stringify(payload));
-        alert('已保存到本地缓存');
+
+        // 2. 保存到服务器数据库
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        const serverPayload = {
+          taskName: this.currentTaskName,
+          planText: this.planMarkdown,
+          codeOnlyText: this.codeSamplesMarkdown,
+          codeBlocks: codeBlocks,
+          language: this.targetLanguage,
+          env: this.runtimeEnv,
+          userId: user.id
+        };
+
+        const resp = await fetch('/api/executable-plan/save', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+          },
+          body: JSON.stringify(serverPayload)
+        });
+
+        if (!resp.ok) {
+          const errData = await resp.json();
+          throw new Error(errData.message || '服务器保存失败');
+        }
+
+        alert('已保存到服务器数据库');
       } catch(e) { this.errorMsg='保存失败: '+ e.message; }
     },
     goNext() {

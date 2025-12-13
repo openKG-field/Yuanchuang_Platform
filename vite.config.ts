@@ -143,6 +143,10 @@ export default defineConfig({
       '/api/task-plan': {
         target: 'http://localhost:3000',
         changeOrigin: true
+      },
+      '/api/executable-plan': {
+        target: 'http://localhost:3000',
+        changeOrigin: true
       }
     }
   }
