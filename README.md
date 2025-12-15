@@ -24,9 +24,9 @@
 - Node.js + Express、MySQL 8.0、JWT、bcrypt、CORS
 
 ### AI
-- DeepSeek API（流式响应、上下文管理）
+- OpenAI 兼容接口（服务端转发，默认模型 deepseek-v3 / deepseek-r1）
 
-## � 工作流程
+## 🧭 工作流程
 
 ```mermaid
 graph LR
@@ -59,15 +59,15 @@ graph LR
 
 ## ⚙️ 快速开始（Windows）
 
-> 开始前请准备：MySQL 连接信息、DeepSeek API Key、JWT 密钥。
+> 开始前请准备：MySQL 连接信息、JWT 密钥；AI Key 可选（见下方说明）。
 
 ### 环境要求
-- Node.js ≥ 16、npm ≥ 7、MySQL ≥ 8.0
+- Node.js ≥ 18（Vite 5 要求）、npm ≥ 8、MySQL ≥ 8.0
 
 ### 安装
 ```powershell
 git clone <repository-url>
-cd AI-WorkFlow-Manager
+cd Yuanchuang_Platform
 npm install
 cd login-backend
 npm install
@@ -79,19 +79,22 @@ npm install
 DB_HOST=localhost
 DB_USER=root
 DB_PASSWORD=your_mysql_password
-DB_NAME=user_system
 PORT=3000
 JWT_SECRET=your_jwt_secret_key
+
+# 可选：如果前端不传 Authorization，则建议在服务端配置 AI Key
+# 三选一即可：OPENAI_API_KEY / DEEPSEEK_API_KEY / QINIU_OPENAI_KEY
+DEEPSEEK_API_KEY=your_api_key
 ```
 
-- 前端：在项目根目录 `.env` 写入
+- 前端（可选）：在项目根目录 `.env` 写入（仅当你希望由前端携带 Authorization 头）
 ```env
 VITE_API_KEY=your_deepseek_api_key
-DASHSCOPE_API_KEY=your_dashscope_api_key
-TAVILY_API_KEY=your_tavily_api_key
 ```
 
 ### 初始化数据库
+> 说明：后端启动时会自动创建 `user_system` 数据库与相关表（存在则跳过）。如需手动初始化，可参考：
+
 ```sql
 CREATE DATABASE user_system CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 -- 可选：创建用户并授权
@@ -166,30 +169,59 @@ GET    /api/dialog-tasks/:userId
 POST   /api/dialog-tasks
 PUT    /api/dialog-tasks/active
 DELETE /api/dialog-tasks/:taskId
+
+# 兼容按任务名删除
+DELETE /api/tasks/by-name/:taskName
 ```
 
 ### 对话与内容
 ```
 POST /api/dialog-messages
 GET  /api/dialog-messages/:userId/:taskName
+PUT  /api/dialog-messages/:messageDbId
 
 POST /api/save-content
+PUT  /api/update-content
 GET  /api/ai-content/:taskName
 
-POST /api/task-manager-content
 GET  /api/task-manager-content/:taskName
 ```
 
 ### 分析与评估
 ```
-POST /api/integration-analysis
+POST /api/save-integration-analysis
 GET  /api/integration-analysis/:taskName
 
-POST /api/results-solution
+POST /api/save-results
 GET  /api/results-solutions/:taskName
+
+POST /api/template-selection/save
+GET  /api/template-selection/:taskName
+
+POST /api/final-result-expanded/save
+GET  /api/final-result-expanded/:taskName
+
+POST /api/executable-plan/save
+GET  /api/executable-plan/:taskName
 
 POST /api/save-visualization-assessment
 GET  /api/visualization-assessments
+```
+
+### AI 代理（与子任务/问题分析）
+```
+POST /api/ai                       # 非流式：一次性返回
+POST /api/combined-plan/stream     # SSE：流式转发
+
+POST /api/ai/decompose-subtasks
+POST /api/ai/analyze-task-problems
+
+POST /api/sub-tasks/batch
+GET  /api/sub-tasks/:taskName
+
+POST /api/task-problems/batch
+GET  /api/task-problems/:taskName
+PUT  /api/task-problems/selection
 ```
 
 ## 🔧 开发指南
@@ -261,7 +293,7 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
 ## 📦 项目结构（简）
 ```
-AI-WorkFlow-Manager/
+Yuanchuang_Platform/
 ├── src/
 │   ├── components/
 │   ├── views/
@@ -294,8 +326,8 @@ MIT License，详见 [LICENSE](LICENSE)。
 
 ---
 
-项目版本：v2.0.0  
-最后更新：2025-09-07  
+项目版本：以 package.json 为准  
+最后更新：2025-12-15  
 维护状态：积极维护中
 
 致谢：感谢所有贡献者与社区成员！
