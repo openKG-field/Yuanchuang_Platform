@@ -73,9 +73,18 @@
           <div class="code-item" v-for="(blk, i) in extractedCodeBlocks" :key="i">
             <div class="code-meta">
               <span class="lang">{{ blk.lang || 'text' }}</span>
-              <button @click="copyCode(blk.code)">复制</button>
+              <div class="meta-actions">
+                <button class="run-btn" @click="simulateRun(blk, i)" :disabled="simulatingIndices.includes(i)">
+                  {{ simulatingIndices.includes(i) ? '运行中...' : '模拟运行' }}
+                </button>
+                <button @click="copyCode(blk.code)">复制</button>
+              </div>
             </div>
             <pre><code>{{ blk.code }}</code></pre>
+            <div v-if="simulationResults[i]" class="simulation-result">
+              <div class="result-title">模拟运行结果:</div>
+              <pre>{{ simulationResults[i] }}</pre>
+            </div>
           </div>
         </div>
         <div class="save-actions">
@@ -125,6 +134,8 @@ export default {
       planMarkdown: '',
       codeSamplesMarkdown: '',
       extractedCodeBlocks: [],
+      simulationResults: {},
+      simulatingIndices: [],
       errorMsg: '',
       isLoadingCtx: false,
       aiScores: this.$route.query.aiScores || ''
@@ -192,7 +203,15 @@ export default {
         '语言与运行环境：' + this.targetLanguage + ' / ' + this.runtimeEnv,
         '粒度：' + this.detailLevel + ' (越详细越好，注意控制 token)',
         '是否含测试: ' + (this.includeTests? '是':'否') + ', 部署: ' + (this.includeDeployment? '是':'否') + ', 安全性能: ' + (this.includeSecurity? '是':'否'),
-        '请使用 Markdown。代码使用```' + (this.targetLanguage === 'typescript' ? 'ts' : (this.targetLanguage === 'javascript' ? 'js' : (this.targetLanguage === 'python' ? 'python' : this.targetLanguage))) + ' 标记。',
+        '请使用 Markdown 格式编写文档。',
+        '【重要 - 代码格式要求】：为了确保系统能自动提取代码，请务必使用以下特殊标记包裹所有代码片段：',
+        '代码开始标记：[[[CODE_START: language]]]',
+        '代码结束标记：[[[CODE_END]]]',
+        '例如：',
+        '[[[CODE_START: javascript]]]',
+        'console.log("Hello");',
+        '[[[CODE_END]]]',
+        '请勿使用 Markdown 的 ``` 符号来包裹这些核心代码片段，直接使用上述自定义标记即可。',
         '若有假设请用（假设）标注。避免多余客套。',
         '原始最终结果：\n' + (this.finalResult || '(无)'),
         'AI整合方案摘要：\n' + (this.combinedPlan ? this.combinedPlan.slice(0,3000) : '(无)'),
@@ -210,7 +229,11 @@ export default {
         '特别要求：每段代码后必须附带“预期运行结果”或“Console Output”示例，展示代码执行效果。',
         '特别要求：请在代码注释或输出说明中，简要解释该结果如何证明了方案的可行性（结论）。',
         '请提供：目录结构建议、核心模块样例、接口/数据模型定义、1-2 个核心算法实现（含运行结果）。',
-        '使用 Markdown，代码块用正确语言标记。不要超过 1200 行。',
+        '使用 Markdown。',
+        '【重要 - 代码格式要求】：请务必使用以下特殊标记包裹代码：',
+        '开始：[[[CODE_START: language]]]',
+        '结束：[[[CODE_END]]]',
+        '不要使用 ``` 符号包裹代码。',
         '参考整合方案：\n' + (this.combinedPlan ? this.combinedPlan.slice(0,2500) : '(无)')
       ].join('\n');
     },
@@ -246,10 +269,21 @@ export default {
     },
     extractCodeBlocks() {
       const all = [this.planMarkdown, this.codeSamplesMarkdown].filter(Boolean).join('\n');
-      const regex = /```(\w+)?\n([\s\S]*?)```/g;
+      // 优先匹配自定义标记 [[[CODE_START: lang]]] ... [[[CODE_END]]]
+      const customRegex = /\[\[\[CODE_START:\s*(\w+)\s*\]\]\]([\s\S]*?)\[\[\[CODE_END\]\]\]/g;
       this.extractedCodeBlocks = [];
-      let m; while((m = regex.exec(all))) {
+      let m; 
+      while((m = customRegex.exec(all))) {
         this.extractedCodeBlocks.push({ lang: (m[1]||'').trim(), code: m[2].trim() });
+      }
+      
+      // 如果没有匹配到自定义标记，尝试回退到 Markdown 格式（兼容旧数据或 AI 不听话的情况）
+      if (this.extractedCodeBlocks.length === 0) {
+        const fallbackRegex = /```(\w+)?\n([\s\S]*?)```/g;
+        let m2; 
+        while((m2 = fallbackRegex.exec(all))) {
+          this.extractedCodeBlocks.push({ lang: (m2[1]||'').trim(), code: m2[2].trim() });
+        }
       }
     },
     copyCode(code) {
@@ -308,6 +342,44 @@ export default {
       // 直接进入 Visualization，保持评分结果透传
       this.$router.push({ name:'Visualization', query: { aiScores: this.aiScores || '' } });
     },
+    async simulateRun(blk, index) {
+      if (this.simulatingIndices.includes(index)) return;
+      this.simulatingIndices.push(index);
+      // 清空旧结果
+      const newResults = { ...this.simulationResults };
+      delete newResults[index];
+      this.simulationResults = newResults;
+
+      try {
+        const prompt = [
+          '你是一个代码执行模拟器。请阅读以下代码，并模拟其执行过程。',
+          '语言：' + (blk.lang || 'text'),
+          '代码：\n' + blk.code,
+          '请直接给出代码运行后的【控制台输出】或【执行结果】。',
+          '如果代码依赖外部环境或数据，请假设合理的默认值或模拟数据。',
+          '不要解释代码逻辑，只输出运行结果。'
+        ].join('\n');
+
+        const resp = await fetch('/api/ai', {
+          method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${import.meta.env.VITE_API_KEY || ''}`},
+          body: JSON.stringify({ model:'deepseek-v3', messages:[{role:'user', content: prompt}], max_tokens: 1000 })
+        });
+      if (!md) return '';
+      // 将自定义标记转换为 Markdown 代码块以便渲染
+      let processed = md.replace(/\[\[\[CODE_START:\s*(\w+)\s*\]\]\]/g, '```$1\n')
+                        .replace(/\[\[\[CODE_END\]\]\]/g, '\n```');
+      return marked(processed);
+   
+        if (!resp.ok) throw new Error('模拟请求失败');
+        const data = await resp.json();
+        const result = data?.choices?.[0]?.message?.content?.trim() || '无输出';
+        this.simulationResults = { ...this.simulationResults, [index]: result };
+      } catch(e) {
+        this.simulationResults = { ...this.simulationResults, [index]: '模拟运行出错: ' + e.message };
+      } finally {
+        this.simulatingIndices = this.simulatingIndices.filter(i => i !== index);
+      }
+    },
     renderMarkdown(md) { return marked(md || ''); }
   }
 };
@@ -340,7 +412,12 @@ h1 { margin:12px 0 24px; font-size:2rem; color:#3b3b6d; font-weight:700; }
 .code-item { background:#ffffff; border:1px solid #d9e2f1; border-radius:8px; padding:12px 14px; margin-bottom:12px; box-shadow:0 1px 6px rgba(60,60,120,0.06); }
 .code-meta { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
 .code-meta .lang { font-size:0.75em; font-weight:600; background:#eef2ff; padding:4px 8px; border-radius:4px; color:#3b3b6d; }
+.meta-actions { display:flex; gap:8px; }
 .code-meta button { padding:4px 10px; font-size:12px; border:none; border-radius:4px; background:#007bff; color:#fff; cursor:pointer; }
+.run-btn { background:linear-gradient(90deg,#28a745,#5be584) !important; }
+.run-btn:disabled { opacity:0.6; cursor:not-allowed; }
+.simulation-result { margin-top:10px; background:#2d3a4b; color:#a8ff60; padding:12px; border-radius:6px; font-family:monospace; font-size:0.9em; white-space:pre-wrap; }
+.result-title { color:#fff; font-size:0.8em; margin-bottom:4px; opacity:0.7; }
 .save-actions { display:flex; gap:12px; margin-top:18px; }
 .save-actions button { padding:10px 20px; border:none; border-radius:6px; background:linear-gradient(90deg,#28a745,#5be584); color:#fff; font-weight:600; cursor:pointer; }
 .save-actions button:disabled { opacity:0.6; }
