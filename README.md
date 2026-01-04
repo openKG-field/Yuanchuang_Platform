@@ -42,23 +42,14 @@
 
 ```mermaid
 graph LR
-    A[1.需求收集] --> B[2.模板生成]
-    B --> C[3.任务拆解]
-    C --> D[4.集成分析]
-    D --> E[5.方案对比]
-    E --> F[6.方法选择]
-    F --> G[7.最终整合]
-    G --> H[8.实施方案]
-    H --> I[9.可视化评估]
-    
-    A1[Dialog] --> B1[Template]
-    B1 --> C1[TaskManager]
-    C1 --> D1[NewIntegration]
-    D1 --> E1[Results]
-    E1 --> F1[TemplateSelection]
-    F1 --> G1[FinalResult]
-    G1 --> H1[ExecutablePlan]
-    H1 --> I1[Visualization]
+    Step1[1.需求收集<br/>Dialog] --> Step2[2.模板生成<br/>Template]
+    Step2 --> Step3[3.任务拆解<br/>TaskManager]
+    Step3 --> Step4[4.集成分析<br/>NewIntegration]
+    Step4 --> Step5[5.方案对比<br/>Results]
+    Step5 --> Step6[6.方法选择<br/>TemplateSelection]
+    Step6 --> Step7[7.最终整合<br/>FinalResult]
+    Step7 --> Step8[8.可执行实施方案<br/>ExecutablePlan]
+    Step8 --> Step9[9.可视化评估<br/>Visualization]
 ```
 
 ## 🧩 核心功能模块详解
