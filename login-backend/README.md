@@ -48,6 +48,7 @@ node server.js
 - template_selection_records：方案对比页保存记录（左右内容+AI推荐方法、created/updated_at）
 - visualization_assessments：可视化评分（task_name、radar数据、评分细项、user_id、时间戳）
 - final_result_expanded：最终整合方案（task_name, method_content, base_content, combined_plan, 时间戳）
+- executable_plans：可执行实施方案（task_name, plan_text, code_only_text, code_blocks, language, env, user_id, 时间戳）
 - 新增 sub_tasks：子任务列表（task_name, sub_task_name, description, difficulty, task_order, status, 时间戳）
 - 新增 task_problems：按子任务分组的问题清单（task_name, sub_task_id, sub_task_name, problem_description, is_critical, is_selected, 时间戳）
 
@@ -193,6 +194,14 @@ NewIntegration
 ### 4.8 清理任务（扩展说明）
 - DELETE `/api/tasks/by-name/:taskName`
 - 行为：清理 conversations、dialog_tasks、ai_content、task_manager_content、results_solutions、new_integration_analysis、visualization_assessments、final_result_expanded、template_selection_records，以及（新增）`sub_tasks`、`task_problems` 中对应数据。
+
+### 4.9 可执行实施方案
+- 保存方案
+  - POST `/api/executable-plan/save`
+  - Body: `{ "taskName": "...", "planText": "...", "codeOnlyText": "...", "codeBlocks": [...], "language": "...", "env": "...", "userId": 1 }`
+- 获取方案
+  - GET `/api/executable-plan/:taskName` (获取最新)
+  - GET `/api/executable-plan/id/:id`
 
 ## 5. 与现有 AI 代理的关系
 - 现有非流式代理：`POST /api/ai`（统一转发到 `openai.qiniu.com/v1/chat/completions`）
