@@ -44,12 +44,13 @@
 graph LR
     Step1[1.需求收集<br/>Dialog] --> Step2[2.模板生成<br/>Template]
     Step2 --> Step3[3.任务拆解<br/>TaskManager]
-    Step3 --> Step4[4.集成分析<br/>NewIntegration]
-    Step4 --> Step5[5.方案对比<br/>Results]
-    Step5 --> Step6[6.方法选择<br/>TemplateSelection]
-    Step6 --> Step7[7.最终整合<br/>FinalResult]
-    Step7 --> Step8[8.可执行实施方案<br/>ExecutablePlan]
-    Step8 --> Step9[9.可视化评估<br/>Visualization]
+    Step3 --> Step4[4.子任务详情<br/>SubTaskDecomposition]
+    Step4 --> Step5[5.集成分析<br/>NewIntegration]
+    Step5 --> Step6[6.方案对比<br/>Results]
+    Step6 --> Step7[7.方法选择<br/>TemplateSelection]
+    Step7 --> Step8[8.最终整合<br/>FinalResult]
+    Step8 --> Step9[9.可执行实施方案<br/>ExecutablePlan]
+    Step9 --> Step10[10.可视化评估<br/>Visualization]
 ```
 
 ## 🧩 核心功能模块详解
@@ -64,24 +65,27 @@ graph LR
 - **三维分析**：从“主演化（趋势）”、“主系统（九宫格）”、“主作用（FOP）”三个维度深度剖析任务背景。
 - **智能拆解**：AI 将复杂任务自动拆解为 1-5 个具体的子任务，并评估每个子任务的难度与优先级。
 
-### 4. 集成分析 (NewIntegration)
+### 4. 子任务详情 (SubTaskDecomposition)
+展示由 TaskManager 拆解生成的子任务列表。用户可以查看每个子任务的详细描述、难度等级及状态，确认无误后进入集成分析阶段。
+
+### 5. 集成分析 (NewIntegration)
 针对拆解出的每个子任务，AI 自动识别潜在的技术难点、依赖关系与风险点（问题清单）。用户可勾选关键问题，系统将针对性地生成初步解决方案。
 
-### 5. 方案生成与对比 (Results)
+### 6. 方案生成与对比 (Results)
 系统并行生成两套完整的解决方案（方案 A 与 方案 B）。这两套方案通常代表不同的技术路线（如“保守稳健型”vs“激进创新型”），帮助用户开拓视野。
 
-### 6. 方法论选择 (TemplateSelection)
+### 7. 方法论选择 (TemplateSelection)
 引入创新思维模型（如**第一性原理**、**逆向思维**、**类比思维**等），对比两套方案的优劣，并推荐最适合当前场景的方法论指导后续落地。
 
-### 7. 最终整合 (FinalResult)
+### 8. 最终整合 (FinalResult)
 综合前序步骤的所有决策与分析，AI 自动生成一份详尽的**最终技术方案文档**，包含项目背景、核心目标、整体架构设计及详细的逻辑流程。
 
-### 8. 可执行实施方案 (ExecutablePlan) 🆕
+### 9. 可执行实施方案 (ExecutablePlan) 🆕
 - **代码生成**：根据用户选定的技术栈（TypeScript/Python/Go 等）和运行环境，生成标准的项目目录结构、核心模块代码骨架。
 - **核心验证**：提供关键算法或业务流的具体实现代码，并附带**预期运行结果**与验证逻辑，确保方案不仅理论可行，且具备工程落地性。
 - **多粒度支持**：支持生成“骨架结构”、“关键模块”或“近完整实现”不同粒度的代码。
 
-### 9. 可视化评估 (Visualization)
+### 10. 可视化评估 (Visualization)
 - **多维评分**：AI 从准确性、清晰度、可解释性、创新性四个维度对最终方案进行打分。
 - **雷达图展示**：直观展示方案的能力分布。
 - **报告导出**：一键生成包含所有阶段内容（对话记录、分析过程、代码片段、评估图表）的专业 PDF 报告，便于汇报与存档。
