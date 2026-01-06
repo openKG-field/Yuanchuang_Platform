@@ -464,6 +464,129 @@
                 </div>
               </div>
 
+              <!-- SubTasks节点内容 -->
+              <div v-else-if="node.type === 'sub-tasks'" class="node-content sub-tasks-node-content">
+                <div class="node-header">
+                  <div class="node-info">
+                    <div class="node-number">子任务拆解</div>
+                    <span class="node-type-badge sub-tasks-badge">任务拆解</span>
+                  </div>
+                </div>
+                <div class="node-body" @click="navigateToSubTasks(node.data)">
+                  <div class="content-field" v-for="(task, idx) in node.data" :key="idx">
+                    <h4>{{ idx + 1 }}. {{ task.sub_task_name }}</h4>
+                    <div class="field-text" style="border-left-color: #6610f2;">
+                      {{ task.description }}
+                    </div>
+                  </div>
+                  <!-- 跳转提示 -->
+                  <div class="navigation-hint">
+                    <i class="nav-icon">🧩</i>
+                    <span>点击查看子任务详情</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- TaskProblems节点内容 -->
+              <div v-else-if="node.type === 'task-problems'" class="node-content task-problems-node-content">
+                <div class="node-header">
+                  <div class="node-info">
+                    <div class="node-number">问题清单</div>
+                    <span class="node-type-badge task-problems-badge">问题分析</span>
+                  </div>
+                </div>
+                <div class="node-body" @click="navigateToTaskProblems(node.data)">
+                  <div v-for="(problems, groupName) in node.data" :key="groupName" class="content-field">
+                    <h4>{{ groupName }}</h4>
+                    <ul style="padding-left: 20px; margin: 5px 0;">
+                      <li v-for="p in problems" :key="p.id" style="font-size: 0.85em; margin-bottom: 4px;">
+                        <span v-if="p.isCritical">🔴 </span>
+                        <span v-if="p.isSelected">✅ </span>
+                        {{ p.description }}
+                      </li>
+                    </ul>
+                  </div>
+                  <!-- 跳转提示 -->
+                  <div class="navigation-hint">
+                    <i class="nav-icon">❓</i>
+                    <span>点击查看问题分析</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- TemplateSelection节点内容 -->
+              <div v-else-if="node.type === 'template-selection'" class="node-content template-selection-node-content">
+                <div class="node-header">
+                  <div class="node-info">
+                    <div class="node-number">方案选择</div>
+                    <span class="node-type-badge template-selection-badge">模板选择</span>
+                  </div>
+                </div>
+                <div class="node-body" @click="navigateToTemplateSelection(node.data)">
+                  <div class="content-field">
+                    <h4>左侧方案:</h4>
+                    <div class="field-text">{{ (node.data.left_content || '').substring(0, 100) }}...</div>
+                  </div>
+                  <div class="content-field">
+                    <h4>右侧方案:</h4>
+                    <div class="field-text">{{ (node.data.right_content || '').substring(0, 100) }}...</div>
+                  </div>
+                  <!-- 跳转提示 -->
+                  <div class="navigation-hint">
+                    <i class="nav-icon">⚖️</i>
+                    <span>点击查看方案对比</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- FinalResult节点内容 -->
+              <div v-else-if="node.type === 'final-result'" class="node-content final-result-node-content">
+                <div class="node-header">
+                  <div class="node-info">
+                    <div class="node-number">最终方案</div>
+                    <span class="node-type-badge final-result-badge">技术方案</span>
+                  </div>
+                </div>
+                <div class="node-body" @click="navigateToFinalResult(node.data)">
+                  <div class="content-field">
+                    <h4>完整方案:</h4>
+                    <div class="field-text" style="max-height: 200px; overflow-y: auto;">
+                      {{ (node.data.combined_plan || '').substring(0, 300) }}...
+                    </div>
+                  </div>
+                  <!-- 跳转提示 -->
+                  <div class="navigation-hint">
+                    <i class="nav-icon">📝</i>
+                    <span>点击查看完整方案</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ExecutablePlan节点内容 -->
+              <div v-else-if="node.type === 'executable-plan'" class="node-content executable-plan-node-content">
+                <div class="node-header">
+                  <div class="node-info">
+                    <div class="node-number">实施方案</div>
+                    <span class="node-type-badge executable-plan-badge">可执行代码</span>
+                  </div>
+                </div>
+                <div class="node-body" @click="navigateToExecutablePlan(node.data)">
+                  <div class="content-field">
+                    <h4>环境/语言:</h4>
+                    <div class="field-text">{{ node.data.env }} / {{ node.data.language }}</div>
+                  </div>
+                  <div class="content-field">
+                    <h4>代码片段:</h4>
+                    <div class="field-text">包含 {{ (node.data.code_blocks || []).length }} 个代码块</div>
+                  </div>
+                  <!-- 跳转提示 -->
+                  <div class="navigation-hint">
+                    <i class="nav-icon">💻</i>
+                    <span>点击查看代码方案</span>
+                  </div>
+                </div>
+              </div>
+
               <!-- 调整大小的控制点 -->
               <div class="resize-handles">
                 <div class="resize-handle nw" @mousedown="startResize($event, node, 'nw')"></div>
@@ -512,6 +635,14 @@ export default {
       integrationAnalysis: [], // Integration Analysis数据
       resultsSolutions: [], // Results Solutions数据
       visualizationAssessments: [], // Visualization Assessments数据
+      
+      // 新增：当前选中任务的扩展数据
+      currentSubTasks: [],
+      currentTaskProblems: {},
+      currentTemplateSelection: null,
+      currentFinalResult: null,
+      currentExecutablePlan: null,
+      
       loading: false,
       selectedTask: null, // 当前选中的任务
       uniqueTasks: [], // 去重后的任务列表
@@ -909,11 +1040,75 @@ export default {
     },
     
     // 选择任务
-    selectTask(taskName) {
+    async selectTask(taskName) {
       this.selectedTask = taskName;
+      
+      // 加载该任务的扩展数据
+      await this.loadTaskSpecificData(taskName);
+      
       this.$nextTick(() => {
         this.createNodes(); // 重新创建节点
       });
+    },
+
+    // 加载特定任务的扩展数据
+    async loadTaskSpecificData(taskName) {
+      if (!taskName) return;
+      
+      // 重置数据
+      this.currentSubTasks = [];
+      this.currentTaskProblems = {};
+      this.currentTemplateSelection = null;
+      this.currentFinalResult = null;
+      this.currentExecutablePlan = null;
+      
+      const encodedName = encodeURIComponent(taskName);
+      const headers = { 'Authorization': `Bearer ${localStorage.getItem('token')}` };
+      
+      try {
+        // 并行加载所有扩展数据
+        const [subTasksRes, problemsRes, templateRes, finalRes, execRes] = await Promise.all([
+          fetch(`/api/sub-tasks/${encodedName}`, { headers }).catch(e => null),
+          fetch(`/api/task-problems/${encodedName}`, { headers }).catch(e => null),
+          fetch(`/api/template-selection/${encodedName}`, { headers }).catch(e => null),
+          fetch(`/api/final-result-expanded/${encodedName}`, { headers }).catch(e => null),
+          fetch(`/api/executable-plan/${encodedName}`, { headers }).catch(e => null)
+        ]);
+
+        // 处理子任务
+        if (subTasksRes && subTasksRes.ok) {
+          const data = await subTasksRes.json();
+          if (data.success) this.currentSubTasks = data.subTasks || [];
+        }
+
+        // 处理任务问题
+        if (problemsRes && problemsRes.ok) {
+          const data = await problemsRes.json();
+          if (data.success) this.currentTaskProblems = data.problems || {};
+        }
+
+        // 处理模板选择
+        if (templateRes && templateRes.ok) {
+          const data = await templateRes.json();
+          if (data.success) this.currentTemplateSelection = data.record;
+        }
+
+        // 处理最终结果
+        if (finalRes && finalRes.ok) {
+          const data = await finalRes.json();
+          if (data.success) this.currentFinalResult = data.record;
+        }
+
+        // 处理可执行方案
+        if (execRes && execRes.ok) {
+          const data = await execRes.json();
+          if (data.success) this.currentExecutablePlan = data.record;
+        }
+        
+        console.log('扩展数据加载完成');
+      } catch (error) {
+        console.error('加载任务扩展数据失败:', error);
+      }
     },
     
     // 显示所有任务
@@ -1017,6 +1212,47 @@ export default {
         });
       });
 
+      // 处理新增的扩展数据节点
+      if (this.currentSubTasks && this.currentSubTasks.length > 0) {
+        allItems.push({
+          type: 'sub-tasks',
+          data: this.currentSubTasks,
+          time: new Date(this.currentSubTasks[0].created_at || Date.now())
+        });
+      }
+
+      if (this.currentTaskProblems && Object.keys(this.currentTaskProblems).length > 0) {
+        allItems.push({
+          type: 'task-problems',
+          data: this.currentTaskProblems,
+          time: new Date() // 使用当前时间或查找数据中的时间
+        });
+      }
+
+      if (this.currentTemplateSelection) {
+        allItems.push({
+          type: 'template-selection',
+          data: this.currentTemplateSelection,
+          time: new Date(this.currentTemplateSelection.created_at)
+        });
+      }
+
+      if (this.currentFinalResult) {
+        allItems.push({
+          type: 'final-result',
+          data: this.currentFinalResult,
+          time: new Date(this.currentFinalResult.created_at)
+        });
+      }
+
+      if (this.currentExecutablePlan) {
+        allItems.push({
+          type: 'executable-plan',
+          data: this.currentExecutablePlan,
+          time: new Date(this.currentExecutablePlan.saved_at || Date.now())
+        });
+      }
+
       console.log('合并后的所有项目:', allItems);
 
       if (allItems.length === 0) {
@@ -1055,18 +1291,27 @@ export default {
       // 创建节点数组
       const newNodes = [];
       allItems.forEach((item, index) => {
+        // 确定节点高度
+        let height = 400;
+        if (item.type === 'conversation') height = 300;
+        else if (item.type === 'task-manager') height = 350;
+        else if (item.type === 'integration-analysis') height = 320;
+        else if (item.type === 'results-solutions') height = 400;
+        else if (item.type === 'visualization-assessments') height = 380;
+        else if (item.type === 'sub-tasks') height = 300;
+        else if (item.type === 'task-problems') height = 350;
+        else if (item.type === 'template-selection') height = 350;
+        else if (item.type === 'final-result') height = 400;
+        else if (item.type === 'executable-plan') height = 400;
+
         const node = {
-          id: `${item.type}-${item.data.id}`,
+          id: `${item.type}-${item.data.id || 'group'}`,
           type: item.type,
           data: item.data,
           x: 50,
           y: nodeY,
           width: 350,
-          height: item.type === 'conversation' ? 300 : 
-                 (item.type === 'task-manager' ? 350 : 
-                  (item.type === 'integration-analysis' ? 320 : 
-                   (item.type === 'results-solutions' ? 400 : 
-                    (item.type === 'visualization-assessments' ? 380 : 400)))),
+          height: height,
           timestamp: this.formatTime(item.time),
           sortTime: item.time
         };
@@ -1107,8 +1352,13 @@ export default {
         const conversationNodes = this.nodes.filter(node => node.type === 'conversation');
         const aiContentNodes = this.nodes.filter(node => node.type === 'ai-content');
         const taskManagerNodes = this.nodes.filter(node => node.type === 'task-manager');
+        const subTasksNodes = this.nodes.filter(node => node.type === 'sub-tasks');
+        const taskProblemsNodes = this.nodes.filter(node => node.type === 'task-problems');
         const integrationAnalysisNodes = this.nodes.filter(node => node.type === 'integration-analysis');
         const resultsSolutionsNodes = this.nodes.filter(node => node.type === 'results-solutions');
+        const templateSelectionNodes = this.nodes.filter(node => node.type === 'template-selection');
+        const finalResultNodes = this.nodes.filter(node => node.type === 'final-result');
+        const executablePlanNodes = this.nodes.filter(node => node.type === 'executable-plan');
         const visualizationAssessmentsNodes = this.nodes.filter(node => node.type === 'visualization-assessments');
         
         // 连接对话到AI内容
@@ -1125,10 +1375,30 @@ export default {
           });
         });
         
-        // 连接TaskManager到Integration Analysis
+        // 连接TaskManager到SubTasks
         taskManagerNodes.forEach(tmNode => {
+          subTasksNodes.forEach(stNode => {
+            this.createConnection(tmNode, stNode);
+          });
+          // 如果没有SubTasks，尝试连接到Integration Analysis (兼容旧数据)
+          if (subTasksNodes.length === 0) {
+            integrationAnalysisNodes.forEach(iaNode => {
+              this.createConnection(tmNode, iaNode);
+            });
+          }
+        });
+
+        // 连接SubTasks到TaskProblems
+        subTasksNodes.forEach(stNode => {
+          taskProblemsNodes.forEach(tpNode => {
+            this.createConnection(stNode, tpNode);
+          });
+        });
+
+        // 连接TaskProblems到Integration Analysis
+        taskProblemsNodes.forEach(tpNode => {
           integrationAnalysisNodes.forEach(iaNode => {
-            this.createConnection(tmNode, iaNode);
+            this.createConnection(tpNode, iaNode);
           });
         });
         
@@ -1138,13 +1408,41 @@ export default {
             this.createConnection(iaNode, rsNode);
           });
         });
-        
-        // 连接Results Solutions到Visualization Assessments
+
+        // 连接Results Solutions到Template Selection
         resultsSolutionsNodes.forEach(rsNode => {
-          visualizationAssessmentsNodes.forEach(vaNode => {
-            this.createConnection(rsNode, vaNode);
+          templateSelectionNodes.forEach(tsNode => {
+            this.createConnection(rsNode, tsNode);
+          });
+          // 如果没有Template Selection，尝试连接到Visualization (兼容旧数据)
+          if (templateSelectionNodes.length === 0) {
+            visualizationAssessmentsNodes.forEach(vaNode => {
+              this.createConnection(rsNode, vaNode);
+            });
+          }
+        });
+
+        // 连接Template Selection到Final Result
+        templateSelectionNodes.forEach(tsNode => {
+          finalResultNodes.forEach(frNode => {
+            this.createConnection(tsNode, frNode);
           });
         });
+
+        // 连接Final Result到Executable Plan
+        finalResultNodes.forEach(frNode => {
+          executablePlanNodes.forEach(epNode => {
+            this.createConnection(frNode, epNode);
+          });
+        });
+
+        // 连接Executable Plan到Visualization Assessments
+        executablePlanNodes.forEach(epNode => {
+          visualizationAssessmentsNodes.forEach(vaNode => {
+            this.createConnection(epNode, vaNode);
+          });
+        });
+        
       } else {
         // 如果没有选中任务，使用按时间排序的传统连接方式
         const sortedNodes = [...this.nodes].sort((a, b) => new Date(a.sortTime) - new Date(b.sortTime));
@@ -1669,6 +1967,76 @@ export default {
       }).catch(err => {
         console.warn('Visualization路由不存在:', err);
       });
+    },
+
+    // 新增：跳转到子任务拆解页面
+    navigateToSubTasks(subTasksData) {
+      if (!subTasksData || subTasksData.length === 0) return;
+      const taskName = subTasksData[0].task_name;
+      
+      this.$router.push({
+        name: 'SubTaskDecomposition',
+        query: {
+          taskName: taskName
+        }
+      });
+    },
+
+    // 新增：跳转到问题清单页面 (目前复用 Integration 页面或新建)
+    // 暂时跳转到 Integration 页面，因为问题分析通常在那里进行
+    navigateToTaskProblems(problemsData) {
+      // 获取任务名 (从数据结构中推断)
+      let taskName = '';
+      const firstGroup = Object.values(problemsData)[0];
+      if (firstGroup && firstGroup.length > 0) {
+        // 这里假设我们能从 problemsData 获取 taskName，或者从当前选中的 taskName 获取
+        taskName = this.selectedTask; 
+      }
+      
+      if (taskName) {
+        this.$router.push({
+          name: 'NewIntegration', // 或者 NewIntegration
+          query: {
+            taskName: taskName
+          }
+        });
+      }
+    },
+
+    // 新增：跳转到方案选择页面
+    navigateToTemplateSelection(selectionData) {
+      if (!selectionData) return;
+      
+      this.$router.push({
+        name: 'TemplateSelection',
+        query: {
+          taskName: selectionData.task_name
+        }
+      });
+    },
+
+    // 新增：跳转到最终方案页面
+    navigateToFinalResult(resultData) {
+      if (!resultData) return;
+      
+      this.$router.push({
+        name: 'FinalResult',
+        query: {
+          taskName: resultData.task_name
+        }
+      });
+    },
+
+    // 新增：跳转到实施方案页面
+    navigateToExecutablePlan(planData) {
+      if (!planData) return;
+      
+      this.$router.push({
+        name: 'ExecutablePlan',
+        query: {
+          taskName: planData.task_name
+        }
+      });
     }
   }
 };
@@ -2066,6 +2434,26 @@ export default {
   border-left: 6px solid #6f42c1 !important;
 }
 
+.sub-tasks-node {
+  border-left: 6px solid #6610f2 !important;
+}
+
+.task-problems-node {
+  border-left: 6px solid #d63384 !important;
+}
+
+.template-selection-node {
+  border-left: 6px solid #fd7e14 !important;
+}
+
+.final-result-node {
+  border-left: 6px solid #198754 !important;
+}
+
+.executable-plan-node {
+  border-left: 6px solid #0d6efd !important;
+}
+
 .resize-handles {
   position: absolute;
   top: 0;
@@ -2164,6 +2552,26 @@ export default {
 
 .visualization-assessments-badge {
   background: linear-gradient(90deg, #20c997 0%, #17a085 100%);
+}
+
+.sub-tasks-badge {
+  background: linear-gradient(90deg, #6610f2 0%, #520dc2 100%);
+}
+
+.task-problems-badge {
+  background: linear-gradient(90deg, #d63384 0%, #a61e61 100%);
+}
+
+.template-selection-badge {
+  background: linear-gradient(90deg, #fd7e14 0%, #c9600b 100%);
+}
+
+.final-result-badge {
+  background: linear-gradient(90deg, #198754 0%, #146c43 100%);
+}
+
+.executable-plan-badge {
+  background: linear-gradient(90deg, #0d6efd 0%, #0a58ca 100%);
 }
 
 .node-body {
@@ -2297,6 +2705,56 @@ export default {
 
 .visualization-assessments-node-content .node-header {
   background: linear-gradient(135deg, #20c997 0%, #17a085 100%);
+  color: white;
+}
+
+/* SubTasks节点特定样式 */
+.sub-tasks-node-content {
+  background: linear-gradient(135deg, #f3e5f5 0%, #fff 100%);
+  border: 2px solid #6610f2;
+}
+.sub-tasks-node-content .node-header {
+  background: linear-gradient(135deg, #6610f2 0%, #520dc2 100%);
+  color: white;
+}
+
+/* TaskProblems节点特定样式 */
+.task-problems-node-content {
+  background: linear-gradient(135deg, #fce4ec 0%, #fff 100%);
+  border: 2px solid #d63384;
+}
+.task-problems-node-content .node-header {
+  background: linear-gradient(135deg, #d63384 0%, #a61e61 100%);
+  color: white;
+}
+
+/* TemplateSelection节点特定样式 */
+.template-selection-node-content {
+  background: linear-gradient(135deg, #fff3e0 0%, #fff 100%);
+  border: 2px solid #fd7e14;
+}
+.template-selection-node-content .node-header {
+  background: linear-gradient(135deg, #fd7e14 0%, #c9600b 100%);
+  color: white;
+}
+
+/* FinalResult节点特定样式 */
+.final-result-node-content {
+  background: linear-gradient(135deg, #e8f5e9 0%, #fff 100%);
+  border: 2px solid #198754;
+}
+.final-result-node-content .node-header {
+  background: linear-gradient(135deg, #198754 0%, #146c43 100%);
+  color: white;
+}
+
+/* ExecutablePlan节点特定样式 */
+.executable-plan-node-content {
+  background: linear-gradient(135deg, #e3f2fd 0%, #fff 100%);
+  border: 2px solid #0d6efd;
+}
+.executable-plan-node-content .node-header {
+  background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
   color: white;
 }
 
