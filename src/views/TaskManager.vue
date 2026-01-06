@@ -912,10 +912,8 @@ export default {
           body: JSON.stringify({ taskName, problems: data?.problems || [] })
         });
         if (!resp2.ok) throw new Error(`保存问题清单失败: ${resp2.status}`);
-        // 跳转到集成分析页（向后兼容：携带 issues 兜底）
-        const issues = this.buildIssuesFromPlan();
-        const payload = (issues.length ? issues : ['已触发后端分析，稍等加载结果']).join('\n');
-        this.$router.push({ name: 'NewIntegration', query: { taskName, fromTaskManager: 'true', issues: payload } });
+        // 跳转到子任务拆解页
+        this.$router.push({ name: 'SubTaskDecomposition', query: { taskName } });
       } finally {
         this.isAnalyzing = false;
       }
